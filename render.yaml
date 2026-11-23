@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: pallcom-mcr
+    runtime: node
+    plan: free
+    branch: main
+    buildCommand: npm ci --include=dev --workspace=@mcr/server --workspace=@mcr/web --workspace=@mcr/ui --workspace=@mcr/shared --workspace=@mcr/domain --workspace=@mcr/validation --workspace=@mcr/obs-client && npm run build:web
+    startCommand: node backend/src/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: SKIP_INSTALL_DEPS
+        value: "true"
+      - key: NODE_ENV
+        value: production
+      - key: MCR_BIND_HOST
+        value: 0.0.0.0
+      - key: MCR_TRUST_PROXY
+        value: "1"
+      - key: STORAGE_MODE
+        value: sqlite
+      - key: SQLITE_DB_PATH
+        value: /tmp/pallcom-mcr/mcr.sqlite
+      - key: JWT_SECRET
+        generateValue: true
+      - key: REFRESH_TOKEN_SECRET
+        generateValue: true
+      - key: ENCRYPTION_MASTER_KEY
+        sync: false
+      - key: MCR_ADMIN_PASSWORD
+        sync: false

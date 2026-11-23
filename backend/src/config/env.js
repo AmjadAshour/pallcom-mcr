@@ -13,6 +13,8 @@ const developmentSecrets = {
 };
 
 const bindHost = process.env.MCR_BIND_HOST || '127.0.0.1';
+const renderOrigin = process.env.RENDER === 'true' ? process.env.RENDER_EXTERNAL_URL : undefined;
+const corsOrigin = process.env.CORS_ORIGIN || renderOrigin;
 const requiresPrivateSecrets = process.env.NODE_ENV === 'production' ||
   !['localhost', '127.0.0.1', '::1'].includes(bindHost);
 
@@ -30,8 +32,8 @@ if (requiresPrivateSecrets) {
 }
 
 if (process.env.NODE_ENV === 'production') {
-  const origin = URL.parse(process.env.CORS_ORIGIN ?? '');
-  if (origin?.protocol !== 'https:' || origin.origin !== process.env.CORS_ORIGIN) {
+  const origin = URL.parse(corsOrigin ?? '');
+  if (origin?.protocol !== 'https:' || origin.origin !== corsOrigin) {
     throw new Error('Set CORS_ORIGIN to the exact public HTTPS origin.');
   }
 }
@@ -40,8 +42,8 @@ export const env = Object.freeze({
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: parseInt(process.env.PORT || '4000', 10),
   APP_NAME: process.env.APP_NAME || 'PALLCOM MCR',
-  APP_URL: process.env.APP_URL || 'http://localhost:4000',
-  CORS_ORIGIN: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  APP_URL: process.env.APP_URL || renderOrigin || 'http://localhost:4000',
+  CORS_ORIGIN: corsOrigin || 'http://localhost:5173',
   STORAGE_MODE: process.env.STORAGE_MODE || (process.env.DATABASE_URL ? 'mysql' : 'sqlite'),
   DATABASE_URL: process.env.DATABASE_URL || '',
   SQLITE_DB_PATH: path.resolve(projectRoot, process.env.SQLITE_DB_PATH || 'backend/database/sqlite/mcr_local.db'),
