@@ -13,7 +13,7 @@ COPY backend/packages/validation/package.json ./backend/packages/validation/
 COPY backend/packages/domain/package.json ./backend/packages/domain/
 COPY backend/packages/obs-client/package.json ./backend/packages/obs-client/
 
-RUN npm ci --workspace=@mcr/web --workspace=@mcr/shared --workspace=@mcr/validation
+RUN npm ci --workspace=@mcr/web --workspace=@mcr/ui --workspace=@mcr/shared --workspace=@mcr/validation
 
 COPY backend/packages/shared ./backend/packages/shared
 COPY backend/packages/validation ./backend/packages/validation

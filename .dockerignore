@@ -2,6 +2,7 @@
 .agents
 .antigravity
 graphify-out
+.mcr-runtime
 **/node_modules
 **/dist
 **/.env

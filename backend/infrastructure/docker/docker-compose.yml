@@ -1,22 +1,4 @@
-version: '3.8'
-
 services:
-  mysql:
-    image: mysql:8.0
-    container_name: mcr_mysql
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: mcr_pro
-      MYSQL_USER: mcr_user
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
-
   server:
     build:
       context: ../../..
@@ -28,8 +10,7 @@ services:
       PORT: 4000
       MCR_BIND_HOST: 0.0.0.0
       MCR_ADMIN_PASSWORD: ${MCR_ADMIN_PASSWORD:-}
-      STORAGE_MODE: mysql
-      DATABASE_URL: mysql://mcr_user:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD}@mysql:3306/mcr_pro
+      STORAGE_MODE: sqlite
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in the deployment environment}
       REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?Set REFRESH_TOKEN_SECRET in the deployment environment}
       ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:?Set ENCRYPTION_MASTER_KEY in the deployment environment}
@@ -38,9 +19,6 @@ services:
       MCR_TRUST_PROXY: "1"
     volumes:
       - mcr_sqlite:/app/backend/database/sqlite
-    depends_on:
-      mysql:
-        condition: service_healthy
 
   web:
     build:
@@ -57,5 +35,4 @@ services:
       - server
 
 volumes:
-  mysql_data:
   mcr_sqlite:

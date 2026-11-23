@@ -82,6 +82,16 @@ export function SettingsPage() {
     }
   };
 
+  function downloadStationFile() {
+    const profile = { serverUrl: new URL(serverHost).origin, pairingCode, expiresAt };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(profile)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'MCR-Station.json';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
@@ -103,7 +113,7 @@ export function SettingsPage() {
             </div>
             <Button variant="outline" size="sm" onClick={handleGeneratePairingCode} disabled={!canPair || !station || generating || saving} className="text-xs">
               <RefreshCw className="w-3.5 h-3.5 me-1" />
-              {ar ? 'إنشاء أمر الاقتران' : 'Generate pairing command'}
+              {ar ? 'إنشاء اقتران' : 'Generate pairing'}
             </Button>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -118,8 +128,11 @@ export function SettingsPage() {
               : (ar ? 'كلمة مرور OBS غير محفوظة' : 'OBS password is unset')}</p>}
             {pairingError && <p role="alert">{pairingError}</p>}
             <p className="text-xs text-zinc-400">
-              {ar ? 'انسخ الأمر وشغّله من مجلد المشروع على جهاز OBS. سيقترن ويبدأ الاتصال تلقائيًا. اترك النافذة مفتوحة.' : 'Run the copied command from the project folder on the OBS computer. It pairs and starts the agent. Leave the terminal open.'}
+              {ar ? 'نزّل ملف المحطة وضعه بجانب تطبيق MCR Agent على جهاز OBS، ثم افتح التطبيق قبل انتهاء صلاحية الملف.' : 'Download the station file, place it next to MCR Agent on the OBS computer, and open the app before the file expires.'}
             </p>
+            {cliCmd && <Button variant="outline" size="sm" onClick={downloadStationFile}>
+              {ar ? 'تنزيل ملف المحطة' : 'Download station file'}
+            </Button>}
 
             <div className="p-4 bg-zinc-950 border border-zinc-800 rounded text-center">
               <span className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">
