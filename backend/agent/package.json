@@ -11,11 +11,12 @@
     "test": "node --test test/*.test.js"
   },
   "dependencies": {
-    "ws": "^8.17.0",
-    "pino": "^9.1.0",
-    "dotenv": "^16.4.5",
-    "@mcr/shared": "*",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
     "@mcr/obs-client": "*",
-    "@mcr/validation": "*"
+    "@mcr/shared": "*",
+    "@mcr/validation": "*",
+    "dotenv": "^16.4.5",
+    "pino": "^9.1.0",
+    "ws": "^8.17.0"
   }
 }

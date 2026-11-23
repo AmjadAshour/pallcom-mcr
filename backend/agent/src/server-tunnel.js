@@ -1,6 +1,7 @@
 import WebSocket from 'ws';
 import { EventEmitter } from 'node:events';
 import { TelemetryCollector } from './telemetry.js';
+import { MediaLibrary } from './media-library.js';
 
 export class ServerTunnel extends EventEmitter {
   constructor({ serverUrl, stationId, agentToken, obsAdapter }) {
@@ -9,6 +10,7 @@ export class ServerTunnel extends EventEmitter {
     this.stationId = stationId;
     this.agentToken = agentToken;
     this.obsAdapter = obsAdapter;
+    this.mediaLibrary = new MediaLibrary();
 
     this.ws = null;
     this.isConnected = false;
@@ -124,6 +126,12 @@ export class ServerTunnel extends EventEmitter {
       const { correlationId, command, params } = msg;
 
       try {
+        if (command === 'ScanPlayoutMedia' || command === 'CheckPlayoutMedia') {
+          const result = command === 'ScanPlayoutMedia'
+            ? await this.mediaLibrary.scan() : await this.mediaLibrary.health(params.assetIds);
+          this.ws.send(JSON.stringify({ type: 'COMMAND_ACK', correlationId, result }));
+          return;
+        }
         if (!this.obsAdapter || !this.obsAdapter.isConnected) {
           throw new Error('OBS Studio is not connected to local agent');
         }
@@ -131,6 +139,24 @@ export class ServerTunnel extends EventEmitter {
         let result = null;
 
         switch (command) {
+          case 'CuePlayoutMedia': {
+            const asset = await this.mediaLibrary.get(params.assetId);
+            if (asset.health !== 'ready') throw new Error('Media file is missing or unreadable');
+            result = await this.obsAdapter.cuePlayoutMedia(params.decks, asset.file);
+            break;
+          }
+          case 'TakePlayoutMedia':
+            result = await this.obsAdapter.takePlayoutMedia(params.cue);
+            break;
+          case 'TakePlayoutScene':
+            result = await this.obsAdapter.takePlayoutScene(params.sceneName);
+            break;
+          case 'GetPlayoutStatus':
+            result = await this.obsAdapter.getPlayoutStatus(params.inputName);
+            break;
+          case 'ApplyPlayoutGraphics':
+            result = await this.obsAdapter.applyPlayoutGraphics(params);
+            break;
           case 'GetStationSnapshot':
             result = await this.obsAdapter.getStationSnapshot();
             break;

@@ -1,6 +1,7 @@
 import { EventSubscription, OBSWebSocket } from 'obs-websocket-js';
 import { EventEmitter } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
+import { randomUUID } from 'node:crypto';
 
 /**
  * Robust OBS Studio WebSocket v5 Adapter
@@ -17,6 +18,7 @@ export class ObsClientAdapter extends EventEmitter {
     };
     this.currentConnection = null;
     this.audioLevels = new Map();
+    this.playoutCue = null;
     this.reconnectTimer = null;
     this.reconnectAttempts = 0;
     this._bindEvents();
@@ -26,6 +28,7 @@ export class ObsClientAdapter extends EventEmitter {
     this.obs.on('ConnectionClosed', (error) => {
       this.isConnected = false;
       this.audioLevels.clear();
+      this.playoutCue = null;
       this.emit('disconnected', error);
       this._scheduleReconnect();
     });
@@ -82,6 +85,10 @@ export class ObsClientAdapter extends EventEmitter {
           peakDb: toDb(Math.max(...inputLevelsMul.map(([, peak]) => peak)))
         });
       }
+    });
+
+    this.obs.on('MediaInputPlaybackEnded', ({ inputName }) => {
+      this.emit('mediaPlaybackEnded', { inputName });
     });
 
     this.obs.on('SceneItemEnableStateChanged', (data) => {
@@ -222,6 +229,84 @@ export class ObsClientAdapter extends EventEmitter {
     const { inputKind } = await this.obs.call('GetInputSettings', { inputName });
     if (!/^text_(gdiplus|ft2_source)(?:_v\d+)?$/.test(inputKind)) throw new Error('Selected input is not an OBS text source');
     return this.obs.call('SetInputSettings', { inputName, inputSettings: { text }, overlay: true });
+  }
+
+  async cuePlayoutMedia(decks, file) {
+    const program = await this.getCurrentProgramScene();
+    const deck = decks.find((item) => item.sceneName !== program);
+    if (!deck) throw new Error('No off-air OBS deck is available');
+    const [{ sceneItems }, { inputKind }, { videoActive }] = await Promise.all([
+      this.getSceneItemList(deck.sceneName),
+      this.obs.call('GetInputSettings', { inputName: deck.inputName }),
+      this.obs.call('GetSourceActive', { sourceName: deck.inputName })
+    ]);
+    if (videoActive || inputKind !== 'ffmpeg_source' ||
+      !sceneItems.some((item) => item.sourceName === deck.inputName && item.sceneItemEnabled)) {
+      throw new Error('The standby deck needs its own enabled OBS Media Source, off Program');
+    }
+    this.playoutCue = null;
+    await this.obs.call('SetInputSettings', {
+      inputName: deck.inputName, overlay: true,
+      inputSettings: { local_file: file, is_local_file: true, looping: false, restart_on_activate: false, close_when_inactive: false }
+    });
+    const cue = { id: randomUUID(), ...deck };
+    this.playoutCue = { ...cue, file };
+    return cue;
+  }
+
+  async takePlayoutMedia({ id }) {
+    const cue = this.playoutCue;
+    this.playoutCue = null;
+    if (cue?.id !== id) throw new Error('Standby cue expired; prepare the deck again');
+    const [{ inputSettings }, { videoActive }] = await Promise.all([
+      this.obs.call('GetInputSettings', { inputName: cue.inputName }),
+      this.obs.call('GetSourceActive', { sourceName: cue.inputName })
+    ]);
+    if (videoActive || inputSettings.local_file !== cue.file) throw new Error('Standby deck changed before take');
+    await this.obs.call('TriggerMediaInputAction', {
+      inputName: cue.inputName, mediaAction: 'OBS_WEBSOCKET_MEDIA_INPUT_ACTION_RESTART'
+    });
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const status = await this.obs.call('GetMediaInputStatus', { inputName: cue.inputName });
+      if (status.mediaState === 'OBS_MEDIA_STATE_PLAYING') {
+        await this.takePlayoutScene(cue.sceneName);
+        const confirmed = await this.obs.call('GetMediaInputStatus', { inputName: cue.inputName }).catch(() => status);
+        return { sceneName: cue.sceneName, inputName: cue.inputName, cursorMs: Math.max(0, confirmed.mediaCursor || 0) };
+      }
+      await delay(75);
+    }
+    throw new Error('OBS could not start the standby media source');
+  }
+
+  async takePlayoutScene(sceneName) {
+    if (await this.getCurrentProgramScene() !== sceneName) await this.cutToScene(sceneName);
+    for (let attempt = 0; attempt < 15; attempt++) {
+      if (await this.getCurrentProgramScene() === sceneName) return { sceneName };
+      await delay(40);
+    }
+    throw new Error('OBS did not confirm the requested Program scene');
+  }
+
+  async getPlayoutStatus(inputName) {
+    const sceneName = await this.getCurrentProgramScene();
+    const status = inputName ? await this.obs.call('GetMediaInputStatus', { inputName }) : {};
+    return { sceneName, mediaState: status.mediaState, cursorMs: status.mediaCursor, durationMs: status.mediaDuration };
+  }
+
+  async applyPlayoutGraphics({ sceneName, overlays, nowNext }) {
+    if (await this.getCurrentProgramScene() !== sceneName) return { warnings: [] };
+    const items = (await this.getSceneItemList(sceneName)).sceneItems;
+    const warnings = [];
+    for (const { source, enabled, text } of overlays) {
+      const item = items.find((value) => value.sourceName === source);
+      if (!item) {
+        warnings.push(`OBS source is absent from Program: ${source}`);
+        continue;
+      }
+      if (text && nowNext) await this.setTextInput(source, nowNext);
+      if (item.sceneItemEnabled !== enabled) await this.setSceneItemEnabled(sceneName, item.sceneItemId, enabled);
+    }
+    return { warnings };
   }
 
   async getCurrentProgramScene() {

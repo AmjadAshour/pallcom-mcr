@@ -9,7 +9,9 @@ async function request(path, options) {
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || result.success !== true) {
-    throw Object.assign(new Error(result.error || `Server request failed (${response.status})`), { status: response.status });
+    throw Object.assign(new Error(result.error || `Server request failed (${response.status})`), {
+      status: response.status, details: result.details
+    });
   }
   return result;
 }

@@ -99,6 +99,18 @@ export function getSqliteDatabase() {
       PRIMARY KEY (stationId, kind)
     );
 
+    CREATE TABLE IF NOT EXISTS station_playout (
+      stationId TEXT PRIMARY KEY, plan TEXT NOT NULL, state TEXT NOT NULL,
+      assets TEXT NOT NULL DEFAULT '[]'
+    );
+
+    CREATE TABLE IF NOT EXISTS playout_as_run (
+      id TEXT PRIMARY KEY, stationId TEXT NOT NULL, itemId TEXT NOT NULL,
+      title TEXT NOT NULL, category TEXT NOT NULL, sceneName TEXT, plannedAt INTEGER,
+      startedAt INTEGER, endedAt INTEGER, outcome TEXT NOT NULL, detail TEXT
+    );
+    CREATE INDEX IF NOT EXISTS playout_as_run_station ON playout_as_run (stationId, startedAt DESC);
+
     CREATE TABLE IF NOT EXISTS audit_logs (
       id TEXT PRIMARY KEY,
       organizationId TEXT NOT NULL,

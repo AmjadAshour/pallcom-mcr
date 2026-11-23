@@ -1,6 +1,7 @@
 import { RepositoryFactory } from '../../infrastructure/repositories/repository-factory.js';
 import { CryptoService } from '../../infrastructure/security/crypto-service.js';
 import { agentGateway } from '../../infrastructure/agent/agent-gateway.js';
+import { removeStationPlayout } from '../../infrastructure/playout/engine.js';
 
 export class StationController {
   static async list(req, res, next) {
@@ -170,6 +171,7 @@ export class StationController {
         return res.status(404).json({ success: false, error: 'Station not found' });
       }
       agentGateway.disconnectDeletedStation(id);
+      removeStationPlayout(id);
 
       await auditRepo.create({
         organizationId: req.user.organizationId,

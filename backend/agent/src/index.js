@@ -4,6 +4,10 @@ import { Keystore } from './keystore.js';
 import { ServerTunnel } from './server-tunnel.js';
 import os from 'node:os';
 import { randomUUID } from 'node:crypto';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'node:url';
+
+dotenv.config({ path: fileURLToPath(new URL('../../../.env', import.meta.url)) });
 
 async function pairDevice(args) {
   const codeIdx = args.indexOf('--code');
@@ -111,6 +115,7 @@ async function startDaemon() {
   obsAdapter.on('recordStateChanged', (data) => tunnel.forwardObsEvent('recordStateChanged', data));
   obsAdapter.on('inputVolumeChanged', (data) => tunnel.forwardObsEvent('inputVolumeChanged', data));
   obsAdapter.on('inputMuteChanged', (data) => tunnel.forwardObsEvent('inputMuteChanged', data));
+  obsAdapter.on('mediaPlaybackEnded', (data) => tunnel.forwardObsEvent('mediaPlaybackEnded', data));
 
   tunnel.start();
 

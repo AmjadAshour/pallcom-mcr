@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { env } from './config/env.js';
 import { apiRouter } from './presentation/routes/index.js';
 import { graphicsRouter } from './presentation/routes/graphics.js';
+import { playoutRouter } from './presentation/routes/playout.js';
+import { attachPlayout, restorePlayout } from './infrastructure/playout/engine.js';
 import { errorHandler } from './presentation/middlewares/error.middleware.js';
 import { apiLimiter } from './presentation/middlewares/rate-limiter.middleware.js';
 import { setupSocketGateway } from './infrastructure/realtime/socket-gateway.js';
@@ -37,6 +39,7 @@ app.use(cors({
 
 // 3. Body Parsing with Strict Size Limits
 app.use('/api/v1/stations/:id/graphics', express.json({ limit: '800kb' }));
+app.use('/api/v1/stations/:id/playout', express.json({ limit: '512kb' }));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 app.use(cookieParser());
@@ -57,6 +60,7 @@ app.get('/health', (req, res) => {
 // 6. Mount Versioned REST API
 app.use('/api/v1', apiRouter);
 app.use('/api/v1', graphicsRouter);
+app.use('/api/v1', playoutRouter);
 const webRoot = fileURLToPath(new URL('../../frontend/dist/', import.meta.url));
 app.use(express.static(webRoot));
 app.get(/^\/(?!api(?:\/|$)|socket\.io(?:\/|$)).*/, (req, res, next) => {
@@ -69,6 +73,7 @@ app.use(errorHandler);
 // 8. Setup Real-time Gateways
 setupSocketGateway(server, env.CORS_ORIGIN);
 setupAgentWsServer(server);
+attachPlayout();
 
 // Ensure default Admin user exists in database on startup
 async function initDefaultData() {
@@ -106,6 +111,7 @@ if (process.env.NODE_ENV !== 'test') {
     logger.info(`[${env.APP_NAME}] Backend running on port ${env.PORT} in ${env.NODE_ENV} mode [Storage: ${env.STORAGE_MODE}]`);
     await initDefaultData();
     startAutomationWorker();
+    restorePlayout();
   });
 }
 
