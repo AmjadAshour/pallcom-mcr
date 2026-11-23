@@ -1,0 +1,40 @@
+{
+  "name": "mcr-pro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PALLCOM MCR - Centralized Broadcast Management & OBS Studio Control Platform",
+  "type": "module",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "dicktob",
+    "backend/agent",
+    "backend/packages/*",
+    "frontend/ui"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace=@mcr/web run dev",
+    "dev:server": "npm --workspace=@mcr/server run dev",
+    "dev:agent": "npm --workspace=@mcr/agent run dev",
+    "dev:desktop": "npm --workspace=@mcr/desktop run dev",
+    "build:web": "npm --workspace=@mcr/web run build",
+    "build:server": "npm --workspace=@mcr/server run build",
+    "test": "npm run test:packages && npm run test:server && npm run test:web && npm --workspace=@mcr/agent run test && npm --workspace=@mcr/desktop run test",
+    "test:packages": "node --test backend/packages/*/test/*.test.js",
+    "test:server": "npm --workspace=@mcr/server run test",
+    "test:web": "npm --workspace=@mcr/web run test",
+    "prisma:generate": "prisma generate --schema=backend/database/prisma/schema.prisma",
+    "prisma:migrate": "prisma migrate dev --schema=backend/database/prisma/schema.prisma",
+    "seed": "node backend/database/seeds/seed.js"
+  },
+  "keywords": [
+    "mcr",
+    "broadcast",
+    "obs-studio",
+    "control-room",
+    "webrtc",
+    "multiview"
+  ],
+  "author": "MCR PRO Team",
+  "license": "PROPRIETARY"
+}

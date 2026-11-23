@@ -1,0 +1,12 @@
+.git
+.agents
+.antigravity
+graphify-out
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*

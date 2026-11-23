@@ -1,0 +1,58 @@
+import React, { useEffect, useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
+import { api } from '../context/api.js';
+
+export function UsersPermissionsPage() {
+  const user = useOutletContext();
+  const canManage = user.permissions.includes('*') || user.permissions.includes('user:manage');
+  const [users, setUsers] = useState([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!canManage) return;
+    const controller = new AbortController();
+    api('/users', { signal: controller.signal }).then(({ data }) => setUsers(data))
+      .catch((failure) => { if (!controller.signal.aborted) setError(failure.message); });
+    return () => controller.abort();
+  }, [canManage]);
+
+  async function addUser(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    setBusy(true);
+    setError('');
+    try {
+      await api('/users', { method: 'POST', body: Object.fromEntries(new FormData(form)) });
+      form.reset();
+      setUsers((await api('/users')).data);
+    } catch (failure) {
+      setError(failure.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="space-y-4">
+      <h1 className="text-lg font-semibold">Users and permissions</h1>
+      <p className="text-sm text-zinc-400">{user.fullName} · {user.role}</p>
+      <p className="text-sm text-zinc-400">{user.permissions.includes('*') ? 'All permissions' : user.permissions.join(', ')}</p>
+      {error && <p role="alert" className="text-red-300">{error}</p>}
+      {canManage && <>
+        <form onSubmit={addUser} className="flex flex-wrap items-end gap-3 rounded border border-zinc-800 p-3">
+          <label>Full name<input className="block rounded bg-zinc-800 p-2" name="fullName" required minLength={2} /></label>
+          <label>Email<input className="block rounded bg-zinc-800 p-2" name="email" type="email" required /></label>
+          <label>Initial password<input className="block rounded bg-zinc-800 p-2" name="password" type="password" minLength={12} autoComplete="new-password" required /></label>
+          <label>Role<select className="block rounded bg-zinc-800 p-2" name="role" defaultValue="VIEWER">
+            <option>VIEWER</option><option>OPERATOR</option><option>STUDIO_MANAGER</option>
+          </select></label>
+          <button disabled={busy} className="rounded bg-cyan-800 px-3 py-2">Create account</button>
+        </form>
+        <ul className="space-y-2">{users.map((item) => <li key={item.id} className="rounded border border-zinc-800 p-3">
+          <strong>{item.fullName}</strong><p className="text-sm text-zinc-400">{item.email} · {item.role} · {item.isActive ? 'Active' : 'Inactive'}</p>
+        </li>)}</ul>
+      </>}
+    </section>
+  );
+}

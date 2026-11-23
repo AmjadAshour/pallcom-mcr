@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =====================================================
+   CSS VARIABLES — Theme Tokens (Dark = default)
+   ===================================================== */
+:root {
+  --bg-base:        #09090b; /* zinc-950 */
+  --bg-surface:     #18181b; /* zinc-900 */
+  --bg-elevated:    #27272a; /* zinc-800 */
+  --text-primary:   #f4f4f5; /* zinc-100 */
+  --text-secondary: #a1a1aa; /* zinc-400 */
+  --text-muted:     #71717a; /* zinc-500 */
+  --border-color:   #3f3f46; /* zinc-700 */
+  --scrollbar-track:#09090b;
+  --scrollbar-thumb:#27272a;
+  --scrollbar-hover:#3f3f46;
+}
+
+/* Light mode — applied when <html> does NOT have class="dark" */
+html:not(.dark) {
+  --bg-base:        #f4f4f5; /* zinc-100 */
+  --bg-surface:     #e4e4e7; /* zinc-200 */
+  --bg-elevated:    #d4d4d8; /* zinc-300 */
+  --text-primary:   #18181b; /* zinc-900 */
+  --text-secondary: #52525b; /* zinc-600 */
+  --text-muted:     #71717a; /* zinc-500 */
+  --border-color:   #a1a1aa; /* zinc-400 */
+  --scrollbar-track:#e4e4e7;
+  --scrollbar-thumb:#a1a1aa;
+  --scrollbar-hover:#71717a;
+}
+
+@layer base {
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    @apply font-sans;
+    transition: background-color 0.25s ease, color 0.25s ease;
+  }
+
+  [dir="rtl"] {
+    @apply font-arabic;
+  }
+}
+
+/* =====================================================
+   THEME-AWARE OVERRIDES — force key zinc classes to 
+   use CSS variables so light mode takes effect
+   ===================================================== */
+
+/* Backgrounds */
+html:not(.dark) .bg-zinc-950 { background-color: var(--bg-base) !important; }
+html:not(.dark) .bg-zinc-950\/95 { background-color: color-mix(in srgb, var(--bg-base) 95%, transparent) !important; }
+html:not(.dark) .bg-zinc-900 { background-color: var(--bg-surface) !important; }
+html:not(.dark) .bg-zinc-900\/80 { background-color: color-mix(in srgb, var(--bg-surface) 80%, transparent) !important; }
+html:not(.dark) .bg-zinc-900\/90 { background-color: color-mix(in srgb, var(--bg-surface) 90%, transparent) !important; }
+html:not(.dark) .bg-zinc-900\/60 { background-color: color-mix(in srgb, var(--bg-surface) 60%, transparent) !important; }
+html:not(.dark) .bg-zinc-800 { background-color: var(--bg-elevated) !important; }
+html:not(.dark) .bg-zinc-800\/30 { background-color: color-mix(in srgb, var(--bg-elevated) 30%, transparent) !important; }
+html:not(.dark) .bg-black { background-color: #d4d4d8 !important; }
+
+/* Text */
+html:not(.dark) .text-zinc-100 { color: var(--text-primary) !important; }
+html:not(.dark) .text-zinc-200 { color: #27272a !important; }
+html:not(.dark) .text-zinc-300 { color: #3f3f46 !important; }
+html:not(.dark) .text-zinc-400 { color: var(--text-secondary) !important; }
+html:not(.dark) .text-zinc-500 { color: var(--text-muted) !important; }
+html:not(.dark) .text-zinc-600 { color: #52525b !important; }
+html:not(.dark) .text-white { color: #18181b !important; }
+
+/* Borders */
+html:not(.dark) .border-zinc-800 { border-color: var(--border-color) !important; }
+html:not(.dark) .border-zinc-700 { border-color: #71717a !important; }
+html:not(.dark) .border-zinc-700\/80 { border-color: rgba(113,113,122,0.8) !important; }
+html:not(.dark) .border-zinc-700\/60 { border-color: rgba(113,113,122,0.6) !important; }
+html:not(.dark) .border-zinc-900 { border-color: #d4d4d8 !important; }
+html:not(.dark) .divide-zinc-800\/60 > * + * { border-color: rgba(161,161,170,0.6) !important; }
+
+/* Hover overrides */
+html:not(.dark) .hover\:border-zinc-700:hover { border-color: #71717a !important; }
+html:not(.dark) .hover\:bg-zinc-800\/30:hover { background-color: color-mix(in srgb, var(--bg-elevated) 30%, transparent) !important; }
+html:not(.dark) .hover\:bg-zinc-700:hover { background-color: #c4c4c8 !important; }
+
+/* Custom scrollbars for broadcast control surfaces */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}
+
+/* Broadcast LED tally glow utilities */
+.glow-pgm {
+  box-shadow: 0 0 15px rgba(220, 38, 38, 0.6);
+}
+
+.glow-pvw {
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.6);
+}
+
+.glow-warn {
+  box-shadow: 0 0 15px rgba(245, 158, 11, 0.6);
+}

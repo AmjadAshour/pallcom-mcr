@@ -1,0 +1,105 @@
+html.broadcast-output,
+html.broadcast-output body,
+html.broadcast-output #root {
+  background: transparent;
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.broadcast-output-frame { position: fixed; inset: 0; }
+
+.broadcast-canvas {
+  container-type: inline-size;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: white;
+  font-family: Arial, sans-serif;
+}
+
+.broadcast-logo {
+  position: absolute;
+  top: 4%;
+  right: 3%;
+  width: 13%;
+  height: 13%;
+  object-fit: contain;
+  object-position: top right;
+}
+
+.broadcast-ad {
+  position: absolute;
+  top: 24%;
+  right: 3%;
+  width: 24%;
+  max-height: 57%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #ffffff45;
+  border-inline-start: .35cqw solid #22d3ee;
+  border-radius: .55cqw;
+  background: #101625ed;
+  padding: 1.1cqw;
+  text-align: center;
+  font-size: 1.65cqw;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.broadcast-ad img {
+  width: 100%;
+  min-height: 0;
+  max-height: 24cqw;
+  flex: 0 1 auto;
+  object-fit: contain;
+}
+
+.broadcast-ad img + p {
+  margin-top: .7cqw;
+  flex: 0 0 auto;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.broadcast-ticker {
+  position: absolute;
+  bottom: 3%;
+  left: 3%;
+  right: 3%;
+  display: flex;
+  min-height: 4cqw;
+  align-items: stretch;
+  border-bottom: .2cqw solid #f87171;
+  background: #170b0ff2;
+  font-size: 1.8cqw;
+  font-weight: 700;
+}
+
+.broadcast-ticker strong {
+  display: grid;
+  place-items: center;
+  padding-inline: 1.15cqw;
+  background: #b91c1c;
+}
+
+.broadcast-ticker-track {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  align-items: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.broadcast-ticker-track span { position: absolute; white-space: nowrap; }
+.broadcast-scroll-ltr { left: 100%; animation: broadcast-left 24s linear infinite; }
+.broadcast-scroll-rtl { right: 100%; animation: broadcast-right 24s linear infinite; }
+@keyframes broadcast-left { to { left: 0; transform: translateX(-100%); } }
+@keyframes broadcast-right { to { right: 0; transform: translateX(100%); } }

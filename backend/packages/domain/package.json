@@ -1,0 +1,12 @@
+{
+  "name": "@mcr/domain",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@mcr/shared": "*"
+  }
+}

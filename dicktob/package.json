@@ -1,0 +1,20 @@
+{
+  "name": "@mcr/desktop",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./src/main/index.js",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron .",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@mcr/shared": "*",
+    "@mcr/domain": "*",
+    "@mcr/obs-client": "*",
+    "@mcr/validation": "*"
+  },
+  "devDependencies": {
+    "electron": "^30.0.9"
+  }
+}
