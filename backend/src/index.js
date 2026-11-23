@@ -21,6 +21,7 @@ import { CryptoService } from './infrastructure/security/crypto-service.js';
 
 const logger = pino({ level: env.LOG_LEVEL });
 const app = express();
+if (process.env.MCR_TRUST_PROXY === '1') app.set('trust proxy', 1);
 const server = http.createServer(app);
 
 // 1. Security Headers (Helmet)
@@ -43,6 +44,12 @@ app.use('/api/v1/stations/:id/playout', express.json({ limit: '512kb' }));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 app.use(cookieParser());
+app.use('/api', (req, res, next) => {
+  const origin = req.get('Origin');
+  if (!origin || ['GET', 'HEAD', 'OPTIONS'].includes(req.method) || origin === env.CORS_ORIGIN) return next();
+  if (env.NODE_ENV !== 'production' && origin === req.protocol + '://' + req.get('Host')) return next();
+  return res.status(403).json({ success: false, error: 'Request origin is not allowed' });
+});
 
 // 4. Rate Limiting on API endpoints
 app.use('/api', apiLimiter);

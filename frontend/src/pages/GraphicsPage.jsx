@@ -15,6 +15,7 @@ const labels = {
     visible: 'معروض', hidden: 'مخفي', expired: 'انتهت المدة', second: 'ث', loading: 'جارٍ تحميل الجرافيكس…',
     preview: 'معاينة العناصر المنشورة', previewEmpty: 'لا توجد عناصر منشورة',
     obs: 'ربط محطة البث مع OBS', copy: 'نسخ رابط المصدر', copied: 'تم النسخ',
+    rotate: 'تجديد الرابط', rotateConfirm: 'سيتوقف الرابط القديم فورًا. تابع إذا كنت مستعدًا لتحديث المصدر في OBS.',
     how: 'على جهاز هذه المحطة، أضف مصدر متصفح (Browser Source) فوق مصادر الفيديو في OBS. الصق الرابط واضبط العرض والارتفاع على مقاس لوحة OBS. استخدم المصدر نفسه في كل مشهد تريد أن تظهر فيه الجرافيكس.',
     access: 'تحتاج إلى صلاحية التحكم بالمحطة لإدارة الجرافيكس.',
     select: 'اختر محطة', confirm: 'حذف هذا العنصر من المحطة؟', error: 'تعذّر تنفيذ العملية', invalidImage: 'اختر صورة PNG أو JPEG أو WebP بحجم لا يتجاوز 512 كيلوبايت.'
@@ -28,6 +29,7 @@ const labels = {
     visible: 'Visible', hidden: 'Hidden', expired: 'Expired', second: 's', loading: 'Loading graphics…',
     preview: 'Published graphics preview', previewEmpty: 'No published graphics',
     obs: 'Connect this station to OBS', copy: 'Copy source URL', copied: 'Copied',
+    rotate: 'Rotate URL', rotateConfirm: 'The old URL stops working immediately. Continue when you are ready to update OBS.',
     how: 'On this station, add a Browser Source above your video in OBS. Paste this URL and use your OBS canvas width and height. Reuse the source in each scene that should show graphics.',
     access: 'Station control permission is required to manage graphics.',
     select: 'Select a station', confirm: 'Delete this graphic from the station?', error: 'The action failed', invalidImage: 'Choose a PNG, JPEG, or WebP image no larger than 512 KB.'
@@ -191,6 +193,7 @@ function StationGraphics({ stationId, t }) {
   const [configuration, setConfiguration] = useState(null);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [rotating, setRotating] = useState(false);
   const [visibleItems, setVisibleItems] = useState([]);
   const path = stationPath(stationId, '/graphics');
 
@@ -241,6 +244,20 @@ function StationGraphics({ stationId, t }) {
           try { await navigator.clipboard.writeText(url); setCopied(true); }
           catch { setError(t.error); }
         }}>{copied ? t.copied : t.copy}</button>
+        <button className={buttonClass} disabled={rotating} onClick={async () => {
+          if (!window.confirm(t.rotateConfirm)) return;
+          setRotating(true);
+          setError('');
+          try {
+            const { token } = await api(path + '/rotate-link', { method: 'POST' });
+            setCopied(false);
+            setConfiguration((current) => ({ ...current, token }));
+          } catch (failure) {
+            setError(failure.message);
+          } finally {
+            setRotating(false);
+          }
+        }}>{t.rotate}</button>
         {error && <p role="alert" className="text-red-300">{error}</p>}
       </section>
     </div>

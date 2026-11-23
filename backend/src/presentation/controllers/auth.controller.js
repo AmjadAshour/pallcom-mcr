@@ -2,6 +2,19 @@ import { RepositoryFactory } from '../../infrastructure/repositories/repository-
 import { CryptoService } from '../../infrastructure/security/crypto-service.js';
 import { env } from '../../config/env.js';
 import { ROLE_PERMISSIONS } from '@mcr/shared';
+import { createSession, revokeSession, rotateSession } from '../../infrastructure/security/session-service.js';
+
+const cookieOptions = { httpOnly: true, secure: env.NODE_ENV === 'production', sameSite: 'strict' };
+
+function setSessionCookies(res, userId, sessionId, tokens) {
+  const accessToken = CryptoService.signAccessToken({ sub: userId, sid: sessionId });
+  res.cookie('mcr_access_token', accessToken, {
+    ...cookieOptions, expires: new Date(CryptoService.verifyAccessToken(accessToken).exp * 1000)
+  });
+  res.cookie('mcr_refresh_token', tokens.refresh, { ...cookieOptions, expires: new Date(tokens.expiresAt) });
+  res.set('Cache-Control', 'no-store');
+  return accessToken;
+}
 
 export class AuthController {
   static async login(req, res, next) {
@@ -11,12 +24,8 @@ export class AuthController {
       const auditRepo = RepositoryFactory.getAuditRepository();
 
       const user = await userRepo.findByEmail(email);
-      if (!user) {
+      if (!user?.isActive) {
         return res.status(401).json({ success: false, error: 'Invalid email or password' });
-      }
-
-      if (!user.isActive) {
-        return res.status(403).json({ success: false, error: 'Account has been deactivated' });
       }
 
       const isValidPassword = await CryptoService.verifyPassword(user.passwordHash, password);
@@ -33,31 +42,6 @@ export class AuthController {
         return res.status(401).json({ success: false, error: 'Invalid email or password' });
       }
 
-      const tokenPayload = {
-        sub: user.id,
-        email: user.email,
-        organizationId: user.organizationId || 'default-org',
-        role: user.role
-      };
-
-      const accessToken = CryptoService.signAccessToken(tokenPayload);
-      const refreshToken = CryptoService.signRefreshToken({ sub: user.id });
-
-      // Set HttpOnly, Secure, SameSite Cookie
-      res.cookie('mcr_access_token', accessToken, {
-        httpOnly: true,
-        secure: env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 15 * 60 * 1000 // 15 mins
-      });
-
-      res.cookie('mcr_refresh_token', refreshToken, {
-        httpOnly: true,
-        secure: env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-      });
-
       await auditRepo.create({
         organizationId: user.organizationId || 'default-org',
         userId: user.id,
@@ -67,6 +51,8 @@ export class AuthController {
         ipAddress: req.ip
       });
 
+      const session = createSession(user.id);
+      const accessToken = setSessionCookies(res, user.id, session.id, session);
       return res.json({
         success: true,
         accessToken,
@@ -99,29 +85,9 @@ export class AuthController {
         return res.status(401).json({ success: false, error: 'Invalid session or inactive user' });
       }
 
-      const tokenPayload = {
-        sub: user.id,
-        email: user.email,
-        organizationId: user.organizationId || 'default-org',
-        role: user.role
-      };
-
-      const newAccessToken = CryptoService.signAccessToken(tokenPayload);
-      const newRefreshToken = CryptoService.signRefreshToken({ sub: user.id });
-
-      res.cookie('mcr_access_token', newAccessToken, {
-        httpOnly: true,
-        secure: env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 15 * 60 * 1000
-      });
-
-      res.cookie('mcr_refresh_token', newRefreshToken, {
-        httpOnly: true,
-        secure: env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000
-      });
+      const tokens = rotateSession(decoded, refreshToken);
+      if (!tokens) return res.status(401).json({ success: false, error: 'Invalid or expired refresh token' });
+      const newAccessToken = setSessionCookies(res, user.id, decoded.sid, tokens);
 
       return res.json({
         success: true,
@@ -134,17 +100,28 @@ export class AuthController {
 
   static async logout(req, res, next) {
     try {
-      res.clearCookie('mcr_access_token');
-      res.clearCookie('mcr_refresh_token');
+      const access = req.headers.authorization?.startsWith('Bearer ')
+        ? req.headers.authorization.slice(7) : req.cookies?.mcr_access_token;
+      let identity;
+      try { if (access) identity = CryptoService.verifyAccessToken(access); } catch { /* Try refresh below. */ }
+      try {
+        if (!identity?.sid && req.cookies?.mcr_refresh_token) {
+          identity = CryptoService.verifyRefreshToken(req.cookies.mcr_refresh_token);
+        }
+      } catch { /* An expired session only needs cookie cleanup. */ }
+      if (identity?.sid) revokeSession(identity.sid, identity.sub);
+      res.clearCookie('mcr_access_token', cookieOptions);
+      res.clearCookie('mcr_refresh_token', cookieOptions);
+      const user = identity?.sub && await RepositoryFactory.getUserRepository().findById(identity.sub);
 
-      if (req.user) {
+      if (user) {
         const auditRepo = RepositoryFactory.getAuditRepository();
         await auditRepo.create({
-          organizationId: req.user.organizationId,
-          userId: req.user.id,
+          organizationId: user.organizationId || 'default-org',
+          userId: user.id,
           action: 'LOGOUT',
           resourceType: 'User',
-          resourceId: req.user.id,
+          resourceId: user.id,
           ipAddress: req.ip
         });
       }

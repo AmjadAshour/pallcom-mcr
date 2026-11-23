@@ -14,7 +14,7 @@ export const CreateStationSchema = z.object({
   name: z.string().min(2).max(100),
   studioId: z.string().uuid().nullable().optional(),
   description: z.string().max(500).optional().default(''),
-  ipAddress: z.string().ip().or(z.literal('127.0.0.1')).or(z.literal('localhost')).default('127.0.0.1'),
+  ipAddress: z.union([z.ipv4(), z.ipv6(), z.literal('localhost')]).default('127.0.0.1'),
   obsPort: z.number().int().min(1).max(65535).default(4455),
   obsPassword: z.string().max(255).optional()
 });
@@ -23,14 +23,14 @@ export const UpdateStationSchema = z.object({
   name: z.string().min(2).max(100).optional(),
   studioId: z.string().uuid().nullable().optional(),
   description: z.string().max(500).optional(),
-  ipAddress: z.string().ip().or(z.literal('127.0.0.1')).or(z.literal('localhost')).optional(),
+  ipAddress: z.union([z.ipv4(), z.ipv6(), z.literal('localhost')]).optional(),
   obsPort: z.number().int().min(1).max(65535).optional(),
   obsPassword: z.string().max(255).optional()
 });
 
 export const ObsCommandSchema = z.object({
   command: z.string().min(1),
-  params: z.record(z.any()).default({})
+  params: z.record(z.string(), z.any()).default({})
 });
 
 export const SceneSwitchSchema = z.object({
@@ -63,7 +63,7 @@ export const MacroCreateSchema = z.object({
   actions: z.array(z.object({
     stationId: z.string().uuid().nullable().optional(),
     actionType: z.string().min(1),
-    parameters: z.record(z.any()),
+    parameters: z.record(z.string(), z.any()),
     sequenceOrder: z.number().int().nonnegative().default(0),
     delayMs: z.number().int().nonnegative().default(0)
   })).min(1, 'At least one action is required')

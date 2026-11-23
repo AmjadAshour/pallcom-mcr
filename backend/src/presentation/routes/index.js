@@ -12,7 +12,7 @@ import { AuditController } from '../controllers/audit.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { authorize } from '../middlewares/rbac.middleware.js';
 import { validateBody } from '../middlewares/validate.middleware.js';
-import { authLimiter } from '../middlewares/rate-limiter.middleware.js';
+import { accountLoginLimiter, authLimiter } from '../middlewares/rate-limiter.middleware.js';
 
 import {
   LoginSchema,
@@ -26,9 +26,9 @@ import {
 export const apiRouter = Router();
 
 // Authentication Endpoints
-apiRouter.post('/auth/login', authLimiter, validateBody(LoginSchema), AuthController.login);
+apiRouter.post('/auth/login', authLimiter, validateBody(LoginSchema), accountLoginLimiter, AuthController.login);
 apiRouter.post('/auth/refresh', AuthController.refresh);
-apiRouter.post('/auth/logout', authenticate, AuthController.logout);
+apiRouter.post('/auth/logout', AuthController.logout);
 apiRouter.get('/auth/me', authenticate, AuthController.me);
 apiRouter.get('/users', authenticate, authorize('user:manage'), async (req, res, next) => {
   try {

@@ -5,7 +5,7 @@ export function validateBody(schema) {
       return res.status(400).json({
         success: false,
         error: 'Validation failed',
-        details: result.error.errors.map((e) => ({
+        details: result.error.issues.map((e) => ({
           field: e.path.join('.'),
           message: e.message
         }))

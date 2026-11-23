@@ -29,6 +29,13 @@ if (requiresPrivateSecrets) {
   }
 }
 
+if (process.env.NODE_ENV === 'production') {
+  const origin = URL.parse(process.env.CORS_ORIGIN ?? '');
+  if (origin?.protocol !== 'https:' || origin.origin !== process.env.CORS_ORIGIN) {
+    throw new Error('Set CORS_ORIGIN to the exact public HTTPS origin.');
+  }
+}
+
 export const env = Object.freeze({
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: parseInt(process.env.PORT || '4000', 10),

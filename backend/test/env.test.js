@@ -27,7 +27,8 @@ test('MCR accepts local development and production with independent private secr
   const generate = () => randomBytes(32).toString('hex');
   const result = loadConfig({
     NODE_ENV: 'production', JWT_SECRET: generate(),
-    REFRESH_TOKEN_SECRET: generate(), ENCRYPTION_MASTER_KEY: generate()
+    REFRESH_TOKEN_SECRET: generate(), ENCRYPTION_MASTER_KEY: generate(),
+    CORS_ORIGIN: 'https://mcr.example.test'
   });
   assert.equal(result.status, 0, result.stderr);
 });

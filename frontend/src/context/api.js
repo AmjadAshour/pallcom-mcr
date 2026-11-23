@@ -1,4 +1,5 @@
 let refreshRequest;
+const refresh = () => request('/auth/refresh', { method: 'POST' });
 
 async function request(path, options) {
   const { method = 'GET', body, signal } = options;
@@ -21,7 +22,9 @@ export async function api(path, options = {}) {
     return await request(path, options);
   } catch (error) {
     if (error.status !== 401 || path === '/auth/login' || path === '/auth/refresh') throw error;
-    refreshRequest ??= request('/auth/refresh', { method: 'POST' }).finally(() => { refreshRequest = null; });
+    refreshRequest ??= (navigator.locks
+      ? navigator.locks.request('mcr-session-refresh', refresh)
+      : refresh()).finally(() => { refreshRequest = null; });
     await refreshRequest;
     return request(path, options);
   }

@@ -2,14 +2,18 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-COPY package.json ./
+COPY package.json package-lock.json ./
 COPY backend/package.json ./backend/
+COPY backend/agent/package.json ./backend/agent/
+COPY frontend/package.json ./frontend/
+COPY frontend/ui/package.json ./frontend/ui/
+COPY dicktob/package.json ./dicktob/
 COPY backend/packages/shared/package.json ./backend/packages/shared/
 COPY backend/packages/domain/package.json ./backend/packages/domain/
 COPY backend/packages/validation/package.json ./backend/packages/validation/
 COPY backend/packages/obs-client/package.json ./backend/packages/obs-client/
 
-RUN npm install --omit=dev
+RUN npm ci --omit=dev --workspace=@mcr/server --workspace=@mcr/shared --workspace=@mcr/domain --workspace=@mcr/validation --workspace=@mcr/obs-client
 
 COPY backend ./backend
 

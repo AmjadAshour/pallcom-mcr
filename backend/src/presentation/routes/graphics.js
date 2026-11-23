@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Router } from 'express';
 import { z } from 'zod';
+import sharp from 'sharp';
 import { getSqliteDatabase } from '../../infrastructure/database/sqlite.js';
 import { RepositoryFactory } from '../../infrastructure/repositories/repository-factory.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
@@ -30,6 +31,23 @@ const settingsSchema = z.object({
   image: z.string().max(700000).refine((image) => !image || Boolean(decodeImage(image)), 'Use a PNG, JPEG, or WebP image up to 512 KB')
 });
 const timerSchema = z.object({ duration: z.number().int().min(0).max(86400) });
+
+async function validateImage(req, res, next) {
+  if (!req.body.image) return next();
+  try {
+    const { bytes, type } = decodeImage(req.body.image);
+    const decoder = sharp(bytes, { failOn: 'warning', limitInputPixels: 4096 * 2160 });
+    const metadata = await decoder.metadata();
+    if (metadata.format !== type || !metadata.width || !metadata.height ||
+      metadata.width > 4096 || metadata.height > 4096 || (metadata.pages ?? 1) !== 1) {
+      throw new Error('Unsupported image');
+    }
+    await decoder.stats();
+    return next();
+  } catch {
+    return res.status(400).json({ success: false, error: 'Use a valid single-frame image up to 4096 pixels per side and 8.8 megapixels' });
+  }
+}
 
 function stationHandler(handler) {
   return async (req, res, next) => {
@@ -70,7 +88,14 @@ graphicsRouter.get(root, authenticate, authorize('station:control'), stationHand
   res.set('Cache-Control', 'no-store').json({ success: true, data: { token, items } });
 }));
 
-graphicsRouter.put(root + '/:kind', authenticate, authorize('station:control'), validateBody(settingsSchema), stationHandler((req, res, db) => {
+graphicsRouter.post(root + '/rotate-link', authenticate, authorize('station:control'), stationHandler((req, res, db) => {
+  const token = randomBytes(32).toString('hex');
+  db.prepare(`INSERT INTO station_graphics_tokens (stationId, token) VALUES (?, ?)
+    ON CONFLICT(stationId) DO UPDATE SET token = excluded.token`).run(req.params.id, token);
+  res.set('Cache-Control', 'no-store').json({ success: true, token });
+}));
+
+graphicsRouter.put(root + '/:kind', authenticate, authorize('station:control'), validateBody(settingsSchema), validateImage, stationHandler((req, res, db) => {
   const { id, kind } = req.params;
   const { content, image } = req.body;
   if ((kind === 'logo' && !image) || (kind === 'ticker' && (!content || image)) ||

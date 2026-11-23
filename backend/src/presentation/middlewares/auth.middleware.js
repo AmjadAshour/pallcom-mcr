@@ -1,4 +1,5 @@
 import { CryptoService } from '../../infrastructure/security/crypto-service.js';
+import { sessionUser } from '../../infrastructure/security/session-service.js';
 
 export function authenticate(req, res, next) {
   let token = null;
@@ -19,12 +20,9 @@ export function authenticate(req, res, next) {
 
   try {
     const decoded = CryptoService.verifyAccessToken(token);
-    req.user = {
-      id: decoded.sub || decoded.id,
-      email: decoded.email,
-      organizationId: decoded.organizationId || 'default-org',
-      role: decoded.role || 'VIEWER'
-    };
+    const user = sessionUser(decoded);
+    if (!user) return res.status(401).json({ success: false, error: 'Invalid session or inactive user.' });
+    req.user = { ...user, sessionId: decoded.sid };
     next();
   } catch (err) {
     return res.status(401).json({

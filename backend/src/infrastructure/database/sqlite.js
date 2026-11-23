@@ -111,6 +111,17 @@ export function getSqliteDatabase() {
     );
     CREATE INDEX IF NOT EXISTS playout_as_run_station ON playout_as_run (stationId, startedAt DESC);
 
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY, userId TEXT NOT NULL, refreshHash TEXT NOT NULL, expiresAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expiresAt);
+    CREATE TRIGGER IF NOT EXISTS revoke_auth_sessions_on_account_change
+    AFTER UPDATE OF isActive, passwordHash ON users
+    WHEN NEW.isActive = 0 OR NEW.passwordHash IS NOT OLD.passwordHash
+    BEGIN
+      DELETE FROM auth_sessions WHERE userId = NEW.id;
+    END;
+
     CREATE TABLE IF NOT EXISTS audit_logs (
       id TEXT PRIMARY KEY,
       organizationId TEXT NOT NULL,

@@ -17,16 +17,19 @@
 ```bash
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 ```
-Keep the existing private encryption key when redeploying against the same database. If you change it, existing station passwords must be saved again before pairing. Changing the JWT signing key invalidates existing access tokens and Agent pairings. Use HTTPS for remote access.
+Keep the existing private encryption key when redeploying against the same database. If you change it, existing station passwords must be saved again before pairing. Changing the JWT signing key invalidates existing access tokens and Agent pairings.
 
-2. Launch Docker Compose stack:
+2. Set `MCR_PUBLIC_ORIGIN` to the exact HTTPS origin (for example `https://mcr.example.org`), and `MCR_TLS_DIRECTORY` to the host directory containing `fullchain.pem` and `privkey.pem`. Set private values for `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD`. Keep the certificate files outside the repository.
+3. If upgrading an existing deployment, back up the SQLite database and migrate it into the Compose `mcr_sqlite` volume before starting the new stack. Existing dashboard users must sign in again after the session upgrade.
+4. Launch Docker Compose:
 ```bash
 docker compose --env-file .env -f backend/infrastructure/docker/docker-compose.yml up -d --build
 ```
 This provisions:
-- MySQL 8.0 container on port 3306 (internal network only).
-- MCR Server Node.js API container on port 4000.
-- Nginx frontend web server on port 80.
+- Internal MySQL and Node.js containers. The web application's SQLite data and sessions persist in the `mcr_sqlite` volume.
+- Nginx serves HTTPS on port 443, redirects port 80 to HTTPS, and proxies Socket.IO and the Agent tunnel over WSS.
+
+For account recovery, use the organization's approved administrative process and verify the operator's identity out of band. Dashboard sessions should be revoked before restoring account access. A dashboard self-service reset and MFA are outside the current deployment workflow.
 
 ---
 
