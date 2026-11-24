@@ -16,7 +16,7 @@ const labels = {
     preview: 'معاينة العناصر المنشورة', previewEmpty: 'لا توجد عناصر منشورة',
     obs: 'ربط محطة البث مع OBS', copy: 'نسخ رابط المصدر', copied: 'تم النسخ',
     rotate: 'تجديد الرابط', rotateConfirm: 'سيتوقف الرابط القديم فورًا. تابع إذا كنت مستعدًا لتحديث المصدر في OBS.',
-    how: 'على جهاز هذه المحطة، أضف مصدر متصفح (Browser Source) فوق مصادر الفيديو في OBS. الصق الرابط واضبط العرض والارتفاع على مقاس لوحة OBS. استخدم المصدر نفسه في كل مشهد تريد أن تظهر فيه الجرافيكس.',
+    how: 'في OBS، اضبط مصدر المتصفح مرة واحدة فوق الفيديو. الصق الرابط واضبط أبعاده على مقاس اللوحة الأساسية بالكامل (مثل 1920 × 1080). من «التحويل» اختر «إعادة ضبط التحويل» ثم «ملاءمة للشاشة». الإعلان يثبت على اليسار بعرض 20%، والشعار أعلى اليمين، والشريط أسفل البث. استخدم مصدر المتصفح نفسه في كل مشهد.',
     access: 'تحتاج إلى صلاحية التحكم بالمحطة لإدارة الجرافيكس.',
     select: 'اختر محطة', confirm: 'حذف هذا العنصر من المحطة؟', error: 'تعذّر تنفيذ العملية', invalidImage: 'اختر صورة PNG أو JPEG أو WebP بحجم لا يتجاوز 512 كيلوبايت.'
   },
@@ -30,7 +30,7 @@ const labels = {
     preview: 'Published graphics preview', previewEmpty: 'No published graphics',
     obs: 'Connect this station to OBS', copy: 'Copy source URL', copied: 'Copied',
     rotate: 'Rotate URL', rotateConfirm: 'The old URL stops working immediately. Continue when you are ready to update OBS.',
-    how: 'On this station, add a Browser Source above your video in OBS. Paste this URL and use your OBS canvas width and height. Reuse the source in each scene that should show graphics.',
+    how: 'Set up one OBS Browser Source above the video. Paste this URL and set its dimensions to the full base canvas (for example, 1920 × 1080). Under Transform, choose Reset Transform, then Fit to Screen. The ad fills the left 20%, the logo sits at the top right, and the ticker stays at the bottom. Reuse this source in each scene.',
     access: 'Station control permission is required to manage graphics.',
     select: 'Select a station', confirm: 'Delete this graphic from the station?', error: 'The action failed', invalidImage: 'Choose a PNG, JPEG, or WebP image no larger than 512 KB.'
   }

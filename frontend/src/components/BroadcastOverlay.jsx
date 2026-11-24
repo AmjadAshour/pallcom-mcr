@@ -8,10 +8,10 @@ export function OverlayCanvas({ items }) {
   const arabic = /[\u0600-\u06ff]/.test(ticker?.content ?? '');
 
   return (
-    <div className="broadcast-canvas">
+    <div className={ad ? 'broadcast-canvas broadcast-canvas-with-ad' : 'broadcast-canvas'}>
       {logo?.image && <img className="broadcast-logo" src={logo.image} alt="" />}
       {ad && <aside className="broadcast-ad" dir="auto">
-        {ad.image && <img src={ad.image} alt="" />}
+        {ad.image && <div className="broadcast-ad-art"><img src={ad.image} alt="" /></div>}
         {ad.content && <p>{ad.content}</p>}
       </aside>}
       {ticker && <div className="broadcast-ticker" dir={arabic ? 'rtl' : 'ltr'}>

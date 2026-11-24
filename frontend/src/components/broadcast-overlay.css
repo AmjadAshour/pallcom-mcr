@@ -11,6 +11,7 @@ html.broadcast-output #root {
 .broadcast-output-frame { position: fixed; inset: 0; }
 
 .broadcast-canvas {
+  --broadcast-ad-width: 20%;
   container-type: inline-size;
   position: relative;
   width: 100%;
@@ -22,8 +23,8 @@ html.broadcast-output #root {
 
 .broadcast-logo {
   position: absolute;
-  top: 4%;
-  right: 3%;
+  top: 3%;
+  right: 2%;
   width: 13%;
   height: 13%;
   object-fit: contain;
@@ -32,18 +33,15 @@ html.broadcast-output #root {
 
 .broadcast-ad {
   position: absolute;
-  top: 24%;
-  right: 3%;
-  width: 24%;
-  max-height: 57%;
+  inset: 0 auto 0 0;
+  width: var(--broadcast-ad-width);
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   overflow: hidden;
-  border: 1px solid #ffffff45;
-  border-inline-start: .35cqw solid #22d3ee;
-  border-radius: .55cqw;
-  background: #101625ed;
-  padding: 1.1cqw;
+  border-right: .2cqw solid #ffffff45;
+  background: #101625;
   text-align: center;
   font-size: 1.65cqw;
   line-height: 1.4;
@@ -51,28 +49,33 @@ html.broadcast-output #root {
   white-space: pre-wrap;
 }
 
-.broadcast-ad img {
-  width: 100%;
+.broadcast-ad-art {
+  flex: 1;
   min-height: 0;
-  max-height: 24cqw;
-  flex: 0 1 auto;
+}
+
+.broadcast-ad-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
 }
 
-.broadcast-ad img + p {
-  margin-top: .7cqw;
+.broadcast-ad p {
+  margin: 0;
+  padding: .8cqw;
   flex: 0 0 auto;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4;
   overflow: hidden;
 }
 
 .broadcast-ticker {
   position: absolute;
-  bottom: 3%;
-  left: 3%;
-  right: 3%;
+  bottom: 0;
+  left: 0;
+  right: 0;
   display: flex;
   min-height: 4cqw;
   align-items: stretch;
@@ -81,6 +84,8 @@ html.broadcast-output #root {
   font-size: 1.8cqw;
   font-weight: 700;
 }
+
+.broadcast-canvas-with-ad .broadcast-ticker { left: var(--broadcast-ad-width); }
 
 .broadcast-ticker strong {
   display: grid;
