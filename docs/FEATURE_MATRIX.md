@@ -11,7 +11,7 @@ Target capabilities follow the [public MCR Box feature inventory](https://mcrbox
 | 5 | File playout | PARTIAL | Scheduler, Agent ffprobe and OBS deck adapter | Real OBS playout; in/out, seek, timing and DST |
 | 6 | Live switching | PARTIAL | LiveControlPage and OBS v5 scene commands | Actual Program output, keying and frame timing |
 | 7 | Graphics | PARTIAL | GraphicsPage, overlay route and OBS text sources | Templates, scoreboards and isolated third-party graphics |
-| 8 | Replay | MISSING | No rolling replay buffer found | Clip timestamp and sync, speed and export |
+| 8 | Replay | PARTIAL | OBS replay buffer start/stop/save controls and OBS save-event timestamp | OBS staging verification, clip playback, marks, variable speed and export |
 | 9 | Audio mixing | PARTIAL | AudioMixerPage and OBS input controls | Delay, EQ, compression, routing and track verification |
 | 10 | Loudness | MISSING | OBS channel levels are available | LUFS, true peak and independent reference measurements |
 | 11 | AI directing | MISSING | No tracking model found | Representative footage, evaluation and operator override |
@@ -24,7 +24,7 @@ Target capabilities follow the [public MCR Box feature inventory](https://mcrbox
 | 18 | HLS / DASH origin | MISSING | No implemented packager found | ABR manifests, signed links and cleanup |
 | 19 | DVB multiplexer | MISSING | No MPEG-TS multiplex worker found | PID/SI/PSI continuity and independent DVB tests |
 | 20 | Conditional access | MISSING | No CAS integration found | Licensed vendor, secure key workflow and validation |
-| 21 | Multiview | PARTIAL | MultiviewPage and OBS screenshots | Measured refresh/latency and configurable independent output |
+| 21 | Multiview | PARTIAL | OBS snapshots, Program/Preview, sortable tiles, fullscreen, measured bitrate and per-input peak levels | Live OBS verification, measured latency and independent encoded output |
 | 22 | TS analyzer | MISSING | No TR 101 290 component found | Independent analyzer and known-good/fault TS fixtures |
 | 23 | Recording | PARTIAL | OBS recording controls and scheduled jobs | Retention, quotas, downloads and recovery evidence |
 | 24 | Fleet / redundancy | PARTIAL | Station-scoped pairing, credential rotation/revocation and liveness telemetry | Independent workers, leases, redundancy and measured recovery |

@@ -18,6 +18,8 @@ export class ObsClientAdapter extends EventEmitter {
     };
     this.currentConnection = null;
     this.audioLevels = new Map();
+    this.streamSample = null;
+    this.lastReplaySavedAt = null;
     this.playoutCue = null;
     this.reconnectTimer = null;
     this.reconnectAttempts = 0;
@@ -28,6 +30,8 @@ export class ObsClientAdapter extends EventEmitter {
     this.obs.on('ConnectionClosed', (error) => {
       this.isConnected = false;
       this.audioLevels.clear();
+      this.streamSample = null;
+      this.lastReplaySavedAt = null;
       this.playoutCue = null;
       this.emit('disconnected', error);
       this._scheduleReconnect();
@@ -78,13 +82,19 @@ export class ObsClientAdapter extends EventEmitter {
     });
 
     this.obs.on('InputVolumeMeters', ({ inputs }) => {
+      const measuredAt = Date.now();
       const toDb = (value) => Math.max(-60, 20 * Math.log10(value || 0));
       for (const { inputName, inputLevelsMul } of inputs) {
         this.audioLevels.set(inputName, {
           levelDb: toDb(Math.max(...inputLevelsMul.map(([level]) => level))),
-          peakDb: toDb(Math.max(...inputLevelsMul.map(([, peak]) => peak)))
+          peakDb: toDb(Math.max(...inputLevelsMul.map(([, peak]) => peak))),
+          measuredAt
         });
       }
+    });
+
+    this.obs.on('ReplayBufferSaved', () => {
+      this.lastReplaySavedAt = new Date().toISOString();
     });
 
     this.obs.on('MediaInputPlaybackEnded', ({ inputName }) => {
@@ -166,10 +176,11 @@ export class ObsClientAdapter extends EventEmitter {
   }
 
   async getStationSnapshot() {
-    const [sceneList, stream, record, studio, inputs, transitions, activeTransition] = await Promise.all([
-      this.getSceneList(), this.getStreamStatus(), this.getRecordStatus(),
+    const [sceneList, output, record, studio, inputs, transitions, activeTransition, replay] = await Promise.all([
+      this.getSceneList(), this.sampleStreamOutput(), this.getRecordStatus(),
       this.obs.call('GetStudioModeEnabled'), this.getInputList(),
-      this.getSceneTransitionList(), this.obs.call('GetCurrentSceneTransition')
+      this.getSceneTransitionList(), this.obs.call('GetCurrentSceneTransition'),
+      this.obs.call('GetReplayBufferStatus').catch(() => null)
     ]);
     const [scenes, audioInputs] = await Promise.all([
       Promise.all(sceneList.scenes.map(async ({ sceneName }) => {
@@ -179,7 +190,10 @@ export class ObsClientAdapter extends EventEmitter {
       Promise.all(inputs.inputs.map(async ({ inputName }) => {
         try {
           const [volume, mute] = await Promise.all([this.getInputVolume(inputName), this.getInputMute(inputName)]);
-          return { name: inputName, volumeMul: volume.inputVolumeMul, volumeDb: volume.inputVolumeDb, muted: mute, ...this.audioLevels.get(inputName) };
+          const sample = this.audioLevels.get(inputName);
+          const fresh = sample && Date.now() - sample.measuredAt < 2000;
+          return { name: inputName, volumeMul: volume.inputVolumeMul, volumeDb: volume.inputVolumeDb, muted: mute,
+            ...(fresh ? { levelDb: sample.levelDb, peakDb: sample.peakDb } : {}) };
         } catch (error) {
           if (error.code === 604 || error.code === 606) return null;
           throw error;
@@ -194,9 +208,32 @@ export class ObsClientAdapter extends EventEmitter {
       transitions: transitions.transitions.map(({ transitionName }) => transitionName),
       transitionName: activeTransition.transitionName,
       transitionDuration: activeTransition.transitionDuration,
-      streamStatus: stream.outputActive ? 'STREAMING' : 'STOPPED',
+      streamStatus: output.active ? 'STREAMING' : 'STOPPED',
+      streamBitrateKbps: output.bitrateKbps,
+      streamReconnecting: output.reconnecting,
+      replayBufferActive: replay?.outputActive ?? null,
+      lastReplaySavedAt: this.lastReplaySavedAt,
       recordStatus: record.outputActive ? 'RECORDING' : 'STOPPED'
     };
+  }
+
+  async sampleStreamOutput() {
+    const stream = await this.getStreamStatus();
+    const previous = this.streamSample;
+    const active = stream.outputActive;
+    const reconnecting = stream.outputReconnecting === true;
+    const current = { bytes: stream.outputBytes, duration: stream.outputDuration, bitrateKbps: null };
+    if (!active || reconnecting || !Number.isFinite(current.bytes) || !Number.isFinite(current.duration)) {
+      this.streamSample = null;
+      return { active, reconnecting, bitrateKbps: null };
+    }
+    if (previous && current.duration >= previous.duration && current.bytes >= previous.bytes) {
+      const interval = current.duration - previous.duration;
+      if (interval < 1000) return { active, reconnecting, bitrateKbps: previous.bitrateKbps };
+      current.bitrateKbps = Math.round((current.bytes - previous.bytes) * 8 / interval);
+    }
+    this.streamSample = current;
+    return { active, reconnecting, bitrateKbps: current.bitrateKbps };
   }
 
   async getSceneScreenshot(preview = false) {

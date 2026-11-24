@@ -92,6 +92,11 @@ apiRouter.post('/stations/:id/stream/start', authenticate, authorize('station:co
 apiRouter.post('/stations/:id/stream/stop', authenticate, authorize('station:control'), ObsController.stopStream);
 apiRouter.post('/stations/:id/record/start', authenticate, authorize('station:control'), ObsController.startRecord);
 apiRouter.post('/stations/:id/record/stop', authenticate, authorize('station:control'), ObsController.stopRecord);
+for (const [action, command] of Object.entries({
+  start: 'StartReplayBuffer', stop: 'StopReplayBuffer', save: 'SaveReplayBuffer'
+})) {
+  apiRouter.post('/stations/:id/replay/' + action, authenticate, authorize('station:control'), ObsController.stationCommand(command));
+}
 apiRouter.post('/stations/:id/audio/volume', authenticate, authorize('station:control'), validateBody(AudioVolumeSchema), ObsController.setVolume);
 apiRouter.post('/stations/:id/audio/mute', authenticate, authorize('station:control'), validateBody(AudioMuteSchema), ObsController.setMute);
 apiRouter.post('/stations/:id/studio-mode/transition', authenticate, authorize('station:control'), ObsController.triggerStudioTransition);

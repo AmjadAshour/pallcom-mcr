@@ -1,11 +1,13 @@
 using System;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
@@ -42,7 +44,12 @@ internal static class Launcher
             try
             {
                 if (!Acquire(mutex)) return;
-                try { Run(); }
+                try
+                {
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                    using (var window = new AgentWindow()) Application.Run(window);
+                }
                 finally { mutex.ReleaseMutex(); }
             }
             catch (Exception error)
@@ -58,20 +65,210 @@ internal static class Launcher
         catch (AbandonedMutexException) { return true; }
     }
 
-    private static void Run()
+    private sealed class AgentWindow : Form
     {
-        string profile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "MCR-Station.json");
-        if (!File.Exists(profile) && !File.Exists(Credentials))
+        private readonly Label status = new Label();
+        private readonly Button start = new Button();
+        private readonly Button stop = new Button();
+        private readonly Button pair = new Button();
+        private readonly NotifyIcon tray = new NotifyIcon();
+        private readonly ContextMenuStrip menu = new ContextMenuStrip();
+        private readonly ToolStripMenuItem stopMenu = new ToolStripMenuItem("Stop agent");
+        private readonly ToolStripMenuItem exitMenu = new ToolStripMenuItem("Exit");
+        private readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
+        private Process worker;
+        private bool ownsInput;
+        private bool busy;
+        private bool exiting;
+
+        public AgentWindow()
         {
-            using (var dialog = new OpenFileDialog { Title = "Open the station file supplied by your administrator", Filter = "MCR station (*.json)|*.json" })
+            Text = Title;
+            AutoScaleMode = AutoScaleMode.Font;
+            ClientSize = new Size(455, 142);
+            FormBorderStyle = FormBorderStyle.FixedDialog;
+            MaximizeBox = false;
+            StartPosition = FormStartPosition.CenterScreen;
+            Icon = SystemIcons.Application;
+
+            var content = new TableLayoutPanel
             {
-                if (dialog.ShowDialog() != DialogResult.OK) return;
-                profile = dialog.FileName;
+                Dock = DockStyle.Fill, Padding = new Padding(16), ColumnCount = 1, RowCount = 2
+            };
+            content.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            content.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            status.Dock = DockStyle.Fill;
+            status.TextAlign = ContentAlignment.MiddleLeft;
+            content.Controls.Add(status, 0, 0);
+            var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = false };
+            start.Text = "Start";
+            stop.Text = "Stop";
+            pair.Text = "Pair...";
+            var hide = new Button { Text = "Hide" };
+            buttons.Controls.AddRange(new Control[] { start, stop, pair, hide });
+            content.Controls.Add(buttons, 0, 1);
+            Controls.Add(content);
+
+            menu.Items.Add("Show window", null, delegate { ShowWindow(); });
+            menu.Items.Add("Hide window", null, delegate { Hide(); });
+            menu.Items.Add(stopMenu);
+            menu.Items.Add(exitMenu);
+            tray.Icon = Icon;
+            tray.Text = Title;
+            tray.ContextMenuStrip = menu;
+            tray.Visible = true;
+            tray.DoubleClick += delegate { ShowWindow(); };
+
+            start.Click += async delegate { await StartAgent(); };
+            pair.Click += async delegate
+            {
+                string profile = SelectStationFile();
+                if (profile != null) await StartAgent(profile);
+            };
+            stop.Click += async delegate { await StopAgent(false); };
+            stopMenu.Click += async delegate { await StopAgent(false); };
+            exitMenu.Click += async delegate { await StopAgent(true); };
+            hide.Click += delegate { Hide(); };
+            Resize += delegate { if (WindowState == FormWindowState.Minimized) Hide(); };
+            FormClosing += delegate(object sender, FormClosingEventArgs args)
+            {
+                if (!exiting && args.CloseReason == CloseReason.UserClosing)
+                {
+                    args.Cancel = true;
+                    Hide();
+                }
+            };
+            timer.Interval = 750;
+            timer.Tick += delegate
+            {
+                if (busy || worker == null || !worker.HasExited) return;
+                ReleaseWorker();
+                SetStatus("The agent stopped. Click Start to try again.");
+            };
+            timer.Start();
+            SetStatus("Stopped.");
+            Shown += async delegate { await StartAgent(); };
+        }
+
+        private void ShowWindow()
+        {
+            WindowState = FormWindowState.Normal;
+            Show();
+            Activate();
+        }
+
+        private void SetStatus(string text)
+        {
+            status.Text = text;
+            start.Enabled = !busy && worker == null;
+            pair.Enabled = !busy;
+            stop.Enabled = stopMenu.Enabled = !busy && worker != null;
+            exitMenu.Enabled = !busy;
+        }
+
+        private string SelectStationFile()
+        {
+            using (var dialog = new OpenFileDialog { Title = "Select your MCR station file", Filter = "MCR station (*.json)|*.json" })
+            {
+                return dialog.ShowDialog(this) == DialogResult.OK ? dialog.FileName : null;
             }
         }
 
+        private async Task StartAgent(string profile = null)
+        {
+            if (busy || (worker != null && profile == null)) return;
+            busy = true;
+            SetStatus("Starting the agent...");
+            try
+            {
+                if (profile == null && !File.Exists(Credentials))
+                {
+                    var defaultProfile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "MCR-Station.json");
+                    profile = File.Exists(defaultProfile) ? defaultProfile : SelectStationFile();
+                    if (profile == null) return;
+                }
+                if (profile != null && !File.Exists(profile))
+                    throw new FileNotFoundException("The selected station file is no longer available.");
+                var result = await Task.Run(() => OpenWorker(profile));
+                if (worker != null && worker.Id == result.Item1.Id && !result.Item2)
+                {
+                    result.Item1.Dispose();
+                }
+                else
+                {
+                    if (worker != null) worker.Dispose();
+                    worker = result.Item1;
+                    ownsInput = result.Item2;
+                }
+            }
+            catch (Exception error)
+            {
+                MessageBox.Show(this, error.Message, Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                busy = false;
+                SetStatus(worker == null ? "Stopped." : "Agent running. Check the station connection in the dashboard.");
+            }
+        }
+
+        private async Task StopAgent(bool close)
+        {
+            if (busy) return;
+            busy = true;
+            SetStatus("Stopping the agent...");
+            try
+            {
+                if (worker != null)
+                {
+                    await Task.Run(() => StopWorker(worker, ownsInput));
+                    ReleaseWorker();
+                }
+                if (close)
+                {
+                    exiting = true;
+                    Close();
+                }
+            }
+            catch (Exception error)
+            {
+                MessageBox.Show(this, error.Message, Title, MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                busy = false;
+                if (!exiting) SetStatus(worker == null ? "Stopped." : "Agent still running.");
+            }
+        }
+
+        private void ReleaseWorker()
+        {
+            worker.Dispose();
+            worker = null;
+            ownsInput = false;
+            try { File.Delete(Worker); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                timer.Dispose();
+                tray.Dispose();
+                menu.Dispose();
+                if (worker != null) worker.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+    }
+
+    private static Tuple<Process, bool> OpenWorker(string profile)
+    {
         string runtime = UnpackRuntime();
-        using (Process running = FindWorker())
+        Process running = FindWorker();
+        try
         {
             if (File.Exists(profile))
             {
@@ -84,20 +281,51 @@ internal static class Launcher
                 {
                     Pair(runtime, json);
                     File.WriteAllText(Receipt, hash);
-                    if (running != null && !running.HasExited) running.WaitForExit(5000);
+                    if (running != null && !running.WaitForExit(5000)) StopWorker(running, false);
                 }
             }
 
-            if (running == null || running.HasExited)
+            if (running != null && !running.HasExited)
             {
-                using (var process = Process.Start(Node(runtime, "start")))
-                {
-                    if (process.WaitForExit(1000)) throw new InvalidOperationException("The agent stopped. Ask your administrator for a fresh station file.");
-                    File.WriteAllText(Worker, process.Id + " " + process.StartTime.ToUniversalTime().Ticks);
-                }
+                Process existing = running;
+                running = null;
+                return Tuple.Create(existing, false);
+            }
+
+            var info = Node(runtime, "start");
+            info.RedirectStandardInput = true;
+            info.EnvironmentVariables["MCR_AGENT_DESKTOP"] = "1";
+            Process process = Process.Start(info);
+            try
+            {
+                if (process.WaitForExit(1000)) throw new InvalidOperationException("The agent stopped. Ask your administrator for a fresh station file.");
+                File.WriteAllText(Worker, process.Id + " " + process.StartTime.ToUniversalTime().Ticks);
+                return Tuple.Create(process, true);
+            }
+            catch
+            {
+                StopWorker(process, true);
+                process.Dispose();
+                throw;
             }
         }
-        MessageBox.Show("The agent is running in the background. Check the station status in the dashboard.", Title);
+        finally
+        {
+            if (running != null) running.Dispose();
+        }
+    }
+
+    private static void StopWorker(Process process, bool closeInput)
+    {
+        if (process.HasExited) return;
+        if (closeInput)
+        {
+            process.StandardInput.Close();
+            if (process.WaitForExit(4000)) return;
+        }
+        try { process.Kill(); }
+        catch (InvalidOperationException) { if (!process.HasExited) throw; }
+        if (!process.WaitForExit(5000)) throw new InvalidOperationException("Windows did not stop the agent.");
     }
 
     private static void Pair(string runtime, string json)

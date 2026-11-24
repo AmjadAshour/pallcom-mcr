@@ -1,113 +1,179 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { Grid, GripVertical, Maximize } from 'lucide-react';
+import { TallyIndicator } from '@mcr/ui';
 import { ProgramPreview } from '../components/ProgramPreview.jsx';
 import { useMcrStore } from '../context/useMcrStore.js';
-import { translations } from '../i18n/translations.js';
-import { TallyIndicator } from '@mcr/ui';
-import { Grid } from 'lucide-react';
+import { api, stationPath } from '../context/api.js';
 
-export function MultiviewPage() {
-  const { language, stations, multiviewLayout, setMultiviewLayout } = useMcrStore();
-  const t = translations[language] || translations.en;
+const grids = {
+  2: 'grid-cols-1 sm:grid-cols-2',
+  3: 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3',
+  4: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4'
+};
+const button = 'rounded border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 focus-visible:outline focus-visible:outline-cyan-400';
 
-  const getGridClasses = () => {
-    switch (multiviewLayout) {
-      case 'grid2x2':
-        return 'grid grid-cols-1 md:grid-cols-2 gap-3 h-[calc(100vh-140px)]';
-      case 'grid3x3':
-        return 'grid grid-cols-2 md:grid-cols-3 gap-2.5 h-[calc(100vh-140px)]';
-      case 'grid4x4':
-        return 'grid grid-cols-2 md:grid-cols-4 gap-2 h-[calc(100vh-140px)]';
-      case 'grid1Plus7':
-      default:
-        return 'grid grid-cols-1 lg:grid-cols-4 gap-3 h-[calc(100vh-140px)]';
+function readLayout(key) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key));
+    return {
+      columns: Object.hasOwn(grids, saved?.columns) ? Number(saved.columns) : 2,
+      order: Array.isArray(saved?.order) ? saved.order.filter((id) => typeof id === 'string') : [],
+      preview: saved?.preview === true
+    };
+  } catch {
+    return { columns: 2, order: [], preview: false };
+  }
+}
+
+function StationTile({ station, preview, ar, canControl }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: station.id });
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const online = station.status === 'ONLINE';
+  const onAir = online && station.streamStatus === 'STREAMING';
+  const scene = preview ? station.currentPreviewScene : station.currentProgramScene;
+  const fps = online && Number.isFinite(station.fps) ? station.fps.toFixed(1) + ' FPS' : '—';
+  const bitrate = online && Number.isFinite(station.streamBitrateKbps) ? station.streamBitrateKbps.toLocaleString() + ' kb/s' : '— kb/s';
+  const audio = online && station.ready ? station.audioInputs ?? [] : [];
+
+  async function replay(action) {
+    setBusy(true);
+    setNotice('');
+    try {
+      await api(stationPath(station.id, '/replay/' + action), { method: 'POST' });
+      setNotice(ar ? 'استلم OBS الطلب' : 'OBS accepted the request');
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setBusy(false);
     }
-  };
-
+  }
   return (
-    <div className="space-y-3 flex flex-col h-full">
-      {/* Top Multiview Controls */}
-      <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
-        <div className="flex items-center gap-2">
-          <Grid className="w-5 h-5 text-cyan-400" />
-          <h1 className="text-base font-bold font-mono text-white tracking-wide uppercase">
-            {t.multiview.title}
-          </h1>
-          <span className="text-xs text-zinc-400">{language === 'ar' ? 'لقطات دورية من OBS' : 'Periodic OBS snapshots'}</span>
-        </div>
-
-        {/* Layout Selectors */}
-        <div className="flex items-center gap-1 bg-zinc-900 border border-zinc-800 p-1 rounded font-mono text-xs">
-          <button
-            onClick={() => setMultiviewLayout('grid2x2')}
-            className={`px-3 py-1 rounded transition-colors ${
-              multiviewLayout === 'grid2x2' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-400 hover:text-white'
-            }`}
-          >
-            {t.multiview.grid2x2}
-          </button>
-          <button
-            onClick={() => setMultiviewLayout('grid3x3')}
-            className={`px-3 py-1 rounded transition-colors ${
-              multiviewLayout === 'grid3x3' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-400 hover:text-white'
-            }`}
-          >
-            {t.multiview.grid3x3}
-          </button>
-          <button
-            onClick={() => setMultiviewLayout('grid4x4')}
-            className={`px-3 py-1 rounded transition-colors ${
-              multiviewLayout === 'grid4x4' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-400 hover:text-white'
-            }`}
-          >
-            {t.multiview.grid4x4}
-          </button>
-        </div>
+    <article ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 1 : undefined }}
+      className={`relative overflow-hidden rounded-lg border bg-black ${onAir ? 'border-red-600' : 'border-zinc-700'}`}>
+      <header className="flex items-center gap-2 bg-zinc-900 px-2.5 py-1.5 text-xs">
+        <button {...attributes} {...listeners} type="button" className="touch-none rounded p-1 hover:bg-zinc-700"
+          aria-label={(ar ? 'ترتيب ' : 'Reorder ') + station.name}><GripVertical size={15} /></button>
+        <TallyIndicator state={onAir ? 'program' : 'idle'} pulse={onAir} size="sm" />
+        <strong className="min-w-0 flex-1 truncate">{station.name}</strong>
+        <span className="font-mono text-zinc-400" title={ar ? 'معدل بث OBS الفعلي' : 'Measured OBS stream bitrate'}>
+          {online && station.streamReconnecting ? (ar ? 'إعادة الاتصال' : 'Reconnecting') : bitrate}
+        </span>
+        <span className="font-mono text-zinc-400">{fps}</span>
+      </header>
+      <div className="grid aspect-video place-items-center overflow-hidden bg-zinc-950">
+        <ProgramPreview key={JSON.stringify([preview, station.status, station.ready])} station={station} preview={preview} />
       </div>
-
-      {/* Multiview Cells Grid */}
-      <div className={getGridClasses()}>
-        {stations.map((st, index) => {
-          const isStreaming = st.streamStatus === 'STREAMING';
-          const isOnline = st.status === 'ONLINE';
-
-          return (
-            <div
-              key={st.id}
-              className={`relative bg-black rounded-lg overflow-hidden flex flex-col border-2 transition-all ${
-                isStreaming
-                  ? 'border-red-600 shadow-[0_0_15px_rgba(220,38,38,0.3)]'
-                  : isOnline
-                  ? 'border-zinc-700'
-                  : 'border-zinc-900 opacity-60'
-              }`}
-            >
-              {/* Multiview Top Bar with Station Name & Tally */}
-              <div
-                className={`px-2.5 py-1 flex items-center justify-between text-xs font-mono font-bold select-none ${
-                  isStreaming
-                    ? 'bg-red-950/90 text-red-400 border-b border-red-800/60'
-                    : 'bg-zinc-900/90 text-zinc-300 border-b border-zinc-800'
-                }`}
-              >
-                <div className="flex items-center gap-2 truncate">
-                  <TallyIndicator
-                    state={isStreaming ? 'program' : isOnline ? 'preview' : 'idle'}
-                    pulse={isStreaming}
-                    size="sm"
-                  />
-                  <span className="truncate">CAM {index + 1}: {st.name}</span>
-                </div>
-                <span className="text-[10px] text-zinc-400">{st.fps.toFixed(1)} FPS</span>
-              </div>
-
-              <div className="relative flex-1 bg-zinc-950 flex items-center justify-center overflow-hidden">
-                <ProgramPreview key={st.id} station={st} />
-              </div>
-            </div>
-          );
+      <footer className="flex items-center justify-between gap-2 border-t border-zinc-800 px-3 py-2 text-xs">
+        <span className="truncate text-zinc-300">{scene || '—'}</span>
+        <span className={online ? 'text-emerald-400' : station.status === 'DEGRADED' ? 'text-amber-400' : 'text-zinc-400'}>{station.status}</span>
+      </footer>
+      {!!audio.length && <div className="max-h-28 space-y-1 overflow-auto bg-zinc-950 px-3 py-2">
+        {audio.map((input) => {
+          const measured = Number.isFinite(input.peakDb);
+          return <div key={input.name} className="flex items-center gap-2 text-xs">
+            <span className="w-20 truncate" title={input.name}>{input.name}</span>
+            {measured && <meter className="min-w-0 flex-1" dir="ltr" min={-60} max={0} low={-20} high={-6} optimum={-12}
+              value={Math.min(0, Math.max(-60, input.peakDb))} aria-label={input.name + ' peak dBFS'} />}
+            <span className="ms-auto whitespace-nowrap font-mono text-zinc-400">
+              {input.muted ? (ar ? 'مكتوم' : 'Muted') : measured ? input.peakDb.toFixed(1) + ' dBFS' : '—'}
+            </span>
+          </div>;
         })}
-      </div>
-    </div>
+      </div>}
+      {online && station.ready && typeof station.replayBufferActive === 'boolean' && <div className="flex flex-wrap items-center gap-2 border-t border-zinc-800 px-3 py-2 text-xs">
+        <span>{station.replayBufferActive ? (ar ? 'مخزن الإعادة نشط' : 'Replay buffer active') : (ar ? 'مخزن الإعادة متوقف' : 'Replay buffer stopped')}</span>
+        {canControl && <>
+          <button type="button" className={button} disabled={busy} onClick={() => replay(station.replayBufferActive ? 'stop' : 'start')}>
+            {station.replayBufferActive ? (ar ? 'إيقاف المخزن' : 'Stop buffer') : (ar ? 'بدء المخزن' : 'Start buffer')}
+          </button>
+          {station.replayBufferActive && <button type="button" className={button} disabled={busy} onClick={() => replay('save')}>
+            {ar ? 'حفظ آخر لقطة' : 'Save replay'}
+          </button>}
+        </>}
+        {station.lastReplaySavedAt && <span>{ar ? 'آخر حفظ' : 'Last saved'} {new Date(station.lastReplaySavedAt).toLocaleTimeString()}</span>}
+        {notice && <span role="status">{notice}</span>}
+      </div>}
+    </article>
   );
 }
 
+function MonitorWall({ storageKey, stations, ar, canControl }) {
+  const [layout, setLayout] = useState(() => readLayout(storageKey));
+  const [notice, setNotice] = useState('');
+  const wall = useRef(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
+  const byId = new Map(stations.map((station) => [station.id, station]));
+  const order = [...new Set([...layout.order.filter((id) => byId.has(id)), ...byId.keys()])];
+
+  function save(next) {
+    setLayout(next);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(next));
+      setNotice('');
+    } catch {
+      setNotice(ar ? 'تعذّر حفظ التخطيط في هذا المتصفح' : 'This browser could not save the layout');
+    }
+  }
+
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement === wall.current) await document.exitFullscreen();
+      else await wall.current.requestFullscreen();
+    } catch {
+      setNotice(ar ? 'تعذّر فتح ملء الشاشة' : 'Fullscreen is unavailable');
+    }
+  }
+
+  return (
+    <section ref={wall} className="space-y-3 bg-zinc-950 p-2 fullscreen:overflow-auto">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+        <div className="flex items-center gap-2">
+          <Grid className="text-cyan-400" size={20} />
+          <h1 className="text-base font-semibold">{ar ? 'المراقبة المتعددة' : 'Multiview'}</h1>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <select className={button} aria-label={ar ? 'عدد الأعمدة' : 'Columns'} value={layout.columns}
+            onChange={(event) => save({ ...layout, columns: Number(event.target.value) })}>
+            {[2, 3, 4].map((count) => <option key={count} value={count}>{count} {ar ? 'أعمدة' : 'columns'}</option>)}
+          </select>
+          <button className={button} type="button" aria-pressed={layout.preview}
+            onClick={() => save({ ...layout, preview: !layout.preview })}>
+            {layout.preview ? (ar ? 'المصدر: المعاينة' : 'Bus: Preview') : (ar ? 'المصدر: البرنامج' : 'Bus: Program')}
+          </button>
+          {document.fullscreenEnabled && <button className={`inline-flex items-center gap-1 ${button}`} type="button" onClick={toggleFullscreen}>
+            <Maximize size={14} />{ar ? 'ملء الشاشة' : 'Fullscreen'}
+          </button>}
+        </div>
+      </header>
+      <p className="text-xs text-zinc-400">{ar ? 'لقطات دورية من OBS. ترتيب المحطات محفوظ في هذا المتصفح.' : 'Periodic OBS snapshots. Station order is saved in this browser.'}</p>
+      {notice && <p role="status" className="text-xs text-amber-400">{notice}</p>}
+      {!order.length && <p className="py-10 text-center text-sm text-zinc-400">{ar ? 'أضف محطة لبدء المراقبة' : 'Add a station to start monitoring'}</p>}
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }) => {
+        if (!over || active.id === over.id) return;
+        const from = order.indexOf(active.id);
+        const to = order.indexOf(over.id);
+        if (from >= 0 && to >= 0) save({ ...layout, order: arrayMove(order, from, to) });
+      }}>
+        <SortableContext items={order} strategy={rectSortingStrategy}>
+          <div className={`grid gap-3 ${grids[layout.columns]}`}>
+            {order.map((id) => <StationTile key={id} station={byId.get(id)} preview={layout.preview} ar={ar} canControl={canControl} />)}
+          </div>
+        </SortableContext>
+      </DndContext>
+    </section>
+  );
+}
+
+export function MultiviewPage() {
+  const { language, stations } = useMcrStore();
+  const user = useOutletContext();
+  const key = 'mcr.multiview.' + JSON.stringify([user.organizationId, user.id]);
+  const canControl = user.permissions.includes('*') || user.permissions.includes('station:control');
+  return <MonitorWall key={key} storageKey={key} stations={stations} ar={language === 'ar'} canControl={canControl} />;
+}

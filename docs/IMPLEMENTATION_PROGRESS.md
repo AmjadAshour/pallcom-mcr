@@ -13,3 +13,15 @@ Added scoped credential generations and revocation, old-socket disconnection, ex
 `npm test` passed 21 tests using temporary SQLite. `npm run build:web` and `npm run build:server` passed. `npm audit --package-lock-only --omit=dev` reported zero known findings. Both [credential acceptance gates](AGENT_CREDENTIAL_GATES.md) passed. No real broadcast, production rollout, or hardware acceptance test was performed.
 
 Next P0 task: split MFA enrollment/recovery from audit tamper resistance and start with MFA for privileged users. Keep Agent command-result schemas and a longer enrollment token tracked before enabling independent network-facing workers.
+
+## Monitoring and replay controls — Modules 21 and 08
+
+Multiview displays averaged OBS stream bitrate from output byte and duration deltas and sampled peak dBFS per named OBS input. A reconnect, a stopped stream, or invalid counters clear the measured bitrate. Stale meter samples are omitted. Operators can start, stop, or save the configured OBS replay buffer through station-scoped, audited commands. OBS save events update the last-save timestamp without exposing a local file path.
+
+These controls require an updated station Agent. OBS must have Replay Buffer enabled in its Output settings. Clip playback, advanced replay editing, and a separate encoding worker remain pending. No live output settings were changed.
+
+## Operator-facing slice — Module 21
+
+Multiview now presents sortable station tiles, responsive column presets, Program and Preview snapshots, and fullscreen. Preferences are scoped to the dashboard user and organization in browser storage. The existing station-scoped snapshot endpoints remain the media source, with no new broadcast commands.
+
+`npm run build:web` passed. Local Chrome with synthetic station responses confirmed drag-and-drop, bus selection, preference persistence and fullscreen. Actual OBS output, measurement of capture latency, larger deployments, audio meters and independent encoded multiview remain unverified or unimplemented. Rollback is limited to the Multiview page and these documentation updates.

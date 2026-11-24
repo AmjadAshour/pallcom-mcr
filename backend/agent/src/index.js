@@ -119,7 +119,10 @@ async function startDaemon() {
 
   tunnel.start();
 
+  let stopping = false;
   const shutdown = async () => {
+    if (stopping) return;
+    stopping = true;
     clearInterval(pairingWatcher);
     console.log('\n[MCR Agent] Shutting down daemon gracefully...');
     tunnel.stop();
@@ -136,6 +139,10 @@ async function startDaemon() {
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  if (process.env.MCR_AGENT_DESKTOP === '1') {
+    process.stdin.once('end', shutdown);
+    process.stdin.resume();
+  }
 }
 
 // CLI Command Parser

@@ -47,7 +47,7 @@ try {
     }
 
     $exe = Join-Path $output 'MCR-Agent-Windows-x64.exe'
-    & $compiler /nologo /target:winexe /platform:x64 "/out:$exe" "/resource:$zip,AgentPayload.zip" /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll (Join-Path $PSScriptRoot 'Launcher.cs')
+    & $compiler /nologo /target:winexe /platform:x64 "/out:$exe" "/resource:$zip,AgentPayload.zip" /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Web.Extensions.dll /reference:System.IO.Compression.dll /reference:System.IO.Compression.FileSystem.dll (Join-Path $PSScriptRoot 'Launcher.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Launcher compilation failed.' }
     Get-Item -LiteralPath $exe
 } finally {

@@ -160,6 +160,12 @@ export class ServerTunnel extends EventEmitter {
           case 'GetStationSnapshot':
             result = await this.obsAdapter.getStationSnapshot();
             break;
+          case 'StartReplayBuffer':
+          case 'StopReplayBuffer':
+          case 'SaveReplayBuffer':
+            await this.obsAdapter.obs.call(command);
+            result = { accepted: true };
+            break;
           case 'GetSceneScreenshot':
             result = await this.obsAdapter.getSceneScreenshot(params.preview);
             break;

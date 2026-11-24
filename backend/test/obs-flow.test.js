@@ -131,6 +131,11 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
   assert.deepEqual((await snapshot.json()).data, { currentProgramScene: 'Program B' });
 
   const authorized = { organizationId: admin.organizationId };
+  const replayPath = stationPath + '/replay/save';
+  assert.equal((await request(replayPath, { method: 'POST', organizationId: 'another-organization' })).status, 404);
+  const replayCommand = once(agent, 'message');
+  assert.equal((await request(replayPath, { ...authorized, method: 'POST' })).status, 200);
+  assert.equal(JSON.parse((await replayCommand)[0]).command, 'SaveReplayBuffer');
   const graphicsPath = stationPath + '/graphics';
   const { data: graphics } = await (await request(graphicsPath, authorized)).json();
   assert.match(graphics.token, /^[a-f0-9]{64}$/);
