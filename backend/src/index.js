@@ -56,10 +56,13 @@ app.use('/api', apiLimiter);
 
 // 5. API Health Check
 app.get('/health', (req, res) => {
+  res.set('Cache-Control', 'no-store');
   res.json({
     status: 'ok',
     app: env.APP_NAME,
     mode: env.STORAGE_MODE,
+    revision: env.DEPLOYMENT_REVISION,
+    sqlitePersistence: env.SQLITE_PERSISTENCE,
     timestamp: new Date().toISOString()
   });
 });

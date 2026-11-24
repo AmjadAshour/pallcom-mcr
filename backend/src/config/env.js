@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,7 +14,8 @@ const developmentSecrets = {
 };
 
 const bindHost = process.env.MCR_BIND_HOST || '127.0.0.1';
-const renderOrigin = process.env.RENDER === 'true' ? process.env.RENDER_EXTERNAL_URL : undefined;
+const onRender = process.env.RENDER === 'true';
+const renderOrigin = onRender ? process.env.RENDER_EXTERNAL_URL : undefined;
 const corsOrigin = process.env.CORS_ORIGIN || renderOrigin;
 const requiresPrivateSecrets = process.env.NODE_ENV === 'production' ||
   !['localhost', '127.0.0.1', '::1'].includes(bindHost);
@@ -38,6 +40,22 @@ if (process.env.NODE_ENV === 'production') {
   }
 }
 
+const sqliteDbPath = path.resolve(projectRoot, process.env.SQLITE_DB_PATH || 'backend/database/sqlite/mcr_local.db');
+const renderDisk = onRender ? process.env.MCR_RENDER_DISK_MOUNT : undefined;
+if (renderDisk) {
+  if (!/^\/[A-Za-z0-9/_-]+$/.test(renderDisk) || !process.env.SQLITE_DB_PATH) {
+    throw new Error('Set MCR_RENDER_DISK_MOUNT and SQLITE_DB_PATH to absolute Render disk paths.');
+  }
+  const mount = path.resolve(renderDisk);
+  if (!sqliteDbPath.startsWith(mount + path.sep)) {
+    throw new Error('SQLITE_DB_PATH must be below MCR_RENDER_DISK_MOUNT.');
+  }
+  const mounts = readFileSync('/proc/self/mountinfo', 'utf8').split('\n');
+  if (!mounts.some((entry) => entry.split(' ')[4] === mount) || realpathSync(mount) !== mount) {
+    throw new Error('The configured Render persistent disk is not mounted.');
+  }
+}
+
 export const env = Object.freeze({
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: parseInt(process.env.PORT || '4000', 10),
@@ -46,7 +64,10 @@ export const env = Object.freeze({
   CORS_ORIGIN: corsOrigin || 'http://localhost:5173',
   STORAGE_MODE: process.env.STORAGE_MODE || (process.env.DATABASE_URL ? 'mysql' : 'sqlite'),
   DATABASE_URL: process.env.DATABASE_URL || '',
-  SQLITE_DB_PATH: path.resolve(projectRoot, process.env.SQLITE_DB_PATH || 'backend/database/sqlite/mcr_local.db'),
+  SQLITE_DB_PATH: sqliteDbPath,
+  DEPLOYMENT_REVISION: onRender && /^[0-9a-f]{40}$/i.test(process.env.RENDER_GIT_COMMIT || '')
+    ? process.env.RENDER_GIT_COMMIT : null,
+  SQLITE_PERSISTENCE: onRender ? (renderDisk ? 'persistent-disk' : 'unverified') : 'local',
   JWT_SECRET: process.env.JWT_SECRET || developmentSecrets.JWT_SECRET,
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '15m',
   REFRESH_TOKEN_SECRET: process.env.REFRESH_TOKEN_SECRET || developmentSecrets.REFRESH_TOKEN_SECRET,

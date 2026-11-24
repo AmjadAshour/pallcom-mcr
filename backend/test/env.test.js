@@ -32,3 +32,13 @@ test('MCR accepts local development and production with independent private secr
   });
   assert.equal(result.status, 0, result.stderr);
 });
+
+test('Render refuses a persistent SQLite configuration outside the configured mount', () => {
+  const result = loadConfig({
+    RENDER: 'true',
+    MCR_RENDER_DISK_MOUNT: '/var/data/mcr',
+    SQLITE_DB_PATH: '/tmp/pallcom-mcr/mcr.sqlite'
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /SQLITE_DB_PATH must be below MCR_RENDER_DISK_MOUNT/);
+});
