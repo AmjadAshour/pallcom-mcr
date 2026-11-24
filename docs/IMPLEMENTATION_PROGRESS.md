@@ -41,3 +41,7 @@ Implemented against the Phase 2 worker and its 720p output profile. A clean imag
 ## Independent Program initiative — Phase 5 advertising
 
 Added a station-scoped image/video library, four independent placement playlists and revision-checked Preview/Apply and live controls. The broadcast scheduler persists timing and override state in SQLite. Receiver testing exposed a one-frame overlap glitch at a lower placement's gap; keeping each placement in a stable layer fixed it. Clock tests cover scheduled eligibility, rotation, simultaneous starts, overrides, restart and DST. The local 720p25 receiver measured a 90-frame cycle (3.6 seconds), decoded the short video repeating, and confirmed the upper placement stayed visible. See the [staging procedure and rollback](INDEPENDENT_PROGRAM_STAGING.md).
+
+## Independent Program initiative — Phase 7 staging acceptance
+
+Full workflow acceptance failed on native scene composition and URL Preview/take. A combined local run exercised actual OBS, a separate picture/audio receiver, watermark, two ad placements, browser refresh, controlled service restart and fault recovery. Fixed RGB watermark opacity handling and added a regression. See the [scenario matrix, evidence and rollback](PHASE_7_ACCEPTANCE.md) and [operator quick guide](STAGING_OPERATOR_GUIDE.md).

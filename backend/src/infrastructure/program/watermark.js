@@ -17,10 +17,11 @@ export async function renderWatermark(settings, image) {
     throw new Error('Unsupported logo');
   }
   const box = watermarkBounds(settings);
-  const { data, info } = await decoder.rotate().resize(box.width, box.height, { fit: 'inside' })
-    .toColourspace('srgb').ensureAlpha().linear([1, 1, 1, settings.opacity / 100], [0, 0, 0, 0])
-    .png().toBuffer({ resolveWithObject: true });
+  const { data: rgba, info } = await decoder.rotate().resize(box.width, box.height, { fit: 'inside' })
+    .toColourspace('srgb').ensureAlpha().raw().toBuffer({ resolveWithObject: true });
   if (!settings.enabled) return '';
+  const data = await sharp(rgba, { raw: { width: info.width, height: info.height, channels: 4 } })
+    .linear([1, 1, 1, settings.opacity / 100], [0, 0, 0, 0]).png().toBuffer();
   const left = box.left + (box.right ? box.width - info.width : 0);
   const top = box.top + (box.bottom ? box.height - info.height : 0);
   return (await sharp({ create: { ...PROGRAM_CANVAS, channels: 4, background: '#00000000' } })
