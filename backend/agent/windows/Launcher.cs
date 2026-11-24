@@ -39,16 +39,23 @@ internal static class Launcher
     [STAThread]
     private static void Main()
     {
+        bool created;
         using (var mutex = new Mutex(false, @"Local\PallcomMcrPortableAgent"))
+        using (var showRequest = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\PallcomMcrPortableAgentShow", out created))
         {
             try
             {
-                if (!Acquire(mutex)) return;
+                if (!Acquire(mutex))
+                {
+                    if (created) MessageBox.Show("An older Agent is running. Open it from the Windows notification area, or close it before upgrading.", Title);
+                    else showRequest.Set();
+                    return;
+                }
                 try
                 {
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
-                    using (var window = new AgentWindow()) Application.Run(window);
+                    using (var window = new AgentWindow(showRequest)) Application.Run(window);
                 }
                 finally { mutex.ReleaseMutex(); }
             }
@@ -81,7 +88,7 @@ internal static class Launcher
         private bool busy;
         private bool exiting;
 
-        public AgentWindow()
+        public AgentWindow(EventWaitHandle showRequest)
         {
             Text = Title;
             AutoScaleMode = AutoScaleMode.Font;
@@ -141,6 +148,7 @@ internal static class Launcher
             timer.Interval = 750;
             timer.Tick += delegate
             {
+                if (showRequest.WaitOne(0)) ShowWindow();
                 if (busy || worker == null || !worker.HasExited) return;
                 ReleaseWorker();
                 SetStatus("The agent stopped. Click Start to try again.");

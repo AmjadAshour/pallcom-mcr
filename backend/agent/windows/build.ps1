@@ -1,9 +1,11 @@
+param([string]$OutputDirectory)
+
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $node = (Get-Command node.exe -CommandType Application | Select-Object -First 1).Source
 if ((& $node -p 'process.arch') -ne 'x64') { throw 'Use x64 Node.js to build the Windows x64 package.' }
 $compiler = Join-Path $env:SystemRoot 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-$output = Join-Path $root 'dist'
+$output = if ($OutputDirectory) { $OutputDirectory } else { Join-Path $root 'dist' }
 $tempRoot = [IO.Path]::GetTempPath().TrimEnd('\')
 $stage = Join-Path $tempRoot ('mcr-agent-build-' + [Guid]::NewGuid())
 $zip = Join-Path $stage 'AgentPayload.zip'
