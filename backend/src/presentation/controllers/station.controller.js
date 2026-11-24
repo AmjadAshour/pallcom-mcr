@@ -20,8 +20,7 @@ export class StationController {
         ipAddress: st.ipAddress,
         obsPort: st.obsPort,
         hasPassword: Boolean(st.encryptedPassword),
-        status: !agentGateway.isAgentOnline(st.id) ? 'OFFLINE'
-          : agentGateway.connectedAgents.get(st.id)?.telemetry?.obsConnected === false ? 'DEGRADED' : 'ONLINE',
+        status: agentGateway.stationStatus(st.id),
         streamStatus: st.streamStatus,
         recordStatus: st.recordStatus,
         currentProgramScene: st.currentProgramScene,
@@ -60,7 +59,7 @@ export class StationController {
         ipAddress: station.ipAddress,
         obsPort: station.obsPort,
         hasPassword: Boolean(station.encryptedPassword),
-        status: station.status,
+        status: agentGateway.stationStatus(station.id),
         streamStatus: station.streamStatus,
         recordStatus: station.recordStatus,
         currentProgramScene: station.currentProgramScene,

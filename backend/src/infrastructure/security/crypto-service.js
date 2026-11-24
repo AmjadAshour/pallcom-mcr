@@ -114,8 +114,8 @@ export class CryptoService {
     return crypto.randomBytes(bytes).toString('hex');
   }
 
-  static signAgentToken(stationId, organizationId) {
-    return jwt.sign({ sub: stationId, organizationId }, env.JWT_SECRET, {
+  static signAgentToken(stationId, organizationId, generation) {
+    return jwt.sign({ sub: stationId, organizationId, generation }, env.JWT_SECRET, {
       issuer: 'MCR_PRO', audience: 'mcr_agent', expiresIn: '90d'
     });
   }

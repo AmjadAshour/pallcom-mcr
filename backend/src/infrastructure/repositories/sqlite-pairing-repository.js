@@ -12,26 +12,24 @@ export class SqlitePairingRepository {
 
     const stmt = this.db.prepare(`
       INSERT INTO pairing_tokens (id, stationId, pairingCode, tokenHash, expiresAt, usedAt, createdByUserId, createdAt)
-      VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
+      SELECT ?, ?, ?, ?, ?, NULL, ?, ?
+      WHERE NOT EXISTS (
+        SELECT 1 FROM pairing_tokens WHERE pairingCode = ? AND usedAt IS NULL AND expiresAt > ?
+      )
     `);
 
-    stmt.run(id, stationId, pairingCode, tokenHash, expiresAt.toISOString(), createdByUserId, now);
+    if (!stmt.run(id, stationId, pairingCode, tokenHash, expiresAt.toISOString(), createdByUserId, now, pairingCode, now).changes) {
+      return null;
+    }
     return { id, stationId, pairingCode, tokenHash, expiresAt, createdByUserId, createdAt: now };
   }
 
   async findByCode(pairingCode) {
     const stmt = this.db.prepare(`
-      SELECT * FROM pairing_tokens WHERE pairingCode = ? AND usedAt IS NULL
+      SELECT * FROM pairing_tokens WHERE pairingCode = ? AND usedAt IS NULL AND expiresAt > ?
     `);
-    const row = stmt.get(pairingCode);
+    const row = stmt.get(pairingCode, new Date().toISOString());
     return row || null;
   }
 
-  async markUsed(id) {
-    const now = new Date().toISOString();
-    const stmt = this.db.prepare(`
-      UPDATE pairing_tokens SET usedAt = ? WHERE id = ? AND usedAt IS NULL AND expiresAt > ?
-    `);
-    return stmt.run(now, id, now).changes === 1;
-  }
 }

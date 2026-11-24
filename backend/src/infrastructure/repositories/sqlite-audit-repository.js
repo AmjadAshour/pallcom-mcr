@@ -2,24 +2,27 @@ import { IAuditLogRepository } from '@mcr/domain';
 import { getSqliteDatabase } from '../database/sqlite.js';
 import crypto from 'node:crypto';
 
+export function insertAuditEvent(db, { organizationId, userId = null, action, resourceType, resourceId = null, details = {}, ipAddress = null }) {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const detailsJson = typeof details === 'string' ? details : JSON.stringify(details);
+
+  const stmt = db.prepare(`
+    INSERT INTO audit_logs (id, organizationId, userId, action, resourceType, resourceId, details, ipAddress, createdAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(id, organizationId, userId, action, resourceType, resourceId, detailsJson, ipAddress, now);
+  return { id, organizationId, userId, action, resourceType, resourceId, details, ipAddress, createdAt: now };
+}
+
 export class SqliteAuditRepository extends IAuditLogRepository {
   constructor() {
     super();
     this.db = getSqliteDatabase();
   }
 
-  async create({ organizationId, userId = null, action, resourceType, resourceId = null, details = {}, ipAddress = null }) {
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const detailsJson = typeof details === 'string' ? details : JSON.stringify(details);
-
-    const stmt = this.db.prepare(`
-      INSERT INTO audit_logs (id, organizationId, userId, action, resourceType, resourceId, details, ipAddress, createdAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    stmt.run(id, organizationId, userId, action, resourceType, resourceId, detailsJson, ipAddress, now);
-    return { id, organizationId, userId, action, resourceType, resourceId, details, ipAddress, createdAt: now };
+  async create(event) {
+    return insertAuditEvent(this.db, event);
   }
 
   async findByOrganizationId(organizationId, options = {}) {

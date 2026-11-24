@@ -1,0 +1,3 @@
+# Security architecture
+
+User authorization is server-side and organization-scoped. Agent credentials are independently scoped to a station. Worker routes must derive tenant and actor from verified credentials. Apply allowlisted protocols and network policy at both control-plane validation and worker egress, including resolver and redirects. Isolate unsafe media decoding and external graphics. Keep secret material out of commands, audit payloads and Git. Plan per-worker credentials and expiration, reversible revocation, MFA, recovery, and tamper-evident audit export before public multi-tenant expansion.

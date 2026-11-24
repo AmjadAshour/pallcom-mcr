@@ -82,6 +82,11 @@ export function getSqliteDatabase() {
       createdAt TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS station_agent_credentials (
+      stationId TEXT PRIMARY KEY REFERENCES stations(id) ON DELETE CASCADE,
+      generation INTEGER NOT NULL CHECK(generation > 0)
+    );
+
     CREATE TABLE IF NOT EXISTS station_automations (
       id TEXT PRIMARY KEY, organizationId TEXT NOT NULL, userId TEXT NOT NULL,
       stationId TEXT NOT NULL, name TEXT NOT NULL, action TEXT NOT NULL, sceneName TEXT,

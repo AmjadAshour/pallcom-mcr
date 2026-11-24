@@ -1,14 +1,18 @@
 import { WebSocketServer } from 'ws';
-import { agentGateway } from './agent-gateway.js';
+import { agentGateway, HEARTBEAT_INTERVAL_MS } from './agent-gateway.js';
 import { RepositoryFactory } from '../repositories/repository-factory.js';
 import { CryptoService } from '../security/crypto-service.js';
+import { currentAgentGeneration } from './agent-credentials.js';
 
 export function setupAgentWsServer(httpServer) {
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
+  const heartbeat = setInterval(() => agentGateway.sweepConnections(), HEARTBEAT_INTERVAL_MS);
+  heartbeat.unref();
+  httpServer.once('close', () => clearInterval(heartbeat));
 
   httpServer.on('upgrade', (request, socket, head) => {
-    const url = new URL(request.url, `http://${request.headers.host}`);
-    if (url.pathname === '/agent-ws') {
+    const url = URL.parse(request.url, 'http://localhost');
+    if (url?.pathname === '/agent-ws') {
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
       });
@@ -16,7 +20,8 @@ export function setupAgentWsServer(httpServer) {
   });
 
   wss.on('connection', async (ws, req) => {
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    ws.on('error', () => ws.terminate());
+    const url = new URL(req.url, 'http://localhost');
     const stationId = url.searchParams.get('stationId') || req.headers['x-station-id'];
     const agentToken = req.headers['x-agent-token'];
 
@@ -44,16 +49,23 @@ export function setupAgentWsServer(httpServer) {
         ws.close(4004, 'Station not registered');
         return;
       }
+      if (ws.readyState !== 1) return;
+      const generation = currentAgentGeneration(stationId, identity.organizationId);
+      if (generation === null || generation !== (identity.generation ?? 0)) {
+        ws.close(4003, 'Agent credentials revoked');
+        return;
+      }
 
       agentGateway.registerAgent(stationId, ws, {
         stationId,
         organizationId: identity.organizationId,
+        expiresAt: identity.exp * 1000,
         ipAddress: req.socket.remoteAddress
       });
 
       // Update station online status
       await stationRepo.updateStatus(stationId, {
-        status: 'ONLINE',
+        status: 'DEGRADED',
         lastHeartbeat: new Date().toISOString()
       });
 

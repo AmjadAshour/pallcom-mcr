@@ -1,6 +1,29 @@
 import { EventEmitter } from 'node:events';
 import crypto from 'node:crypto';
-import { SOCKET_EVENTS } from '@mcr/shared';
+import { z } from 'zod';
+
+export const HEARTBEAT_INTERVAL_MS = 5_000;
+const TELEMETRY_TIMEOUT_MS = 15_000;
+const MAX_PENDING_COMMANDS = 32;
+const MAX_SEND_BUFFER = 1024 * 1024;
+const name = z.string().min(1).max(512);
+const nonnegative = z.number().nonnegative();
+const telemetrySchema = z.object({
+  obsConnected: z.boolean(), fps: nonnegative.max(1000).optional(),
+  cpuUsage: nonnegative.max(100).optional(), memoryUsage: nonnegative.max(100).optional(),
+  droppedFrames: nonnegative.int().optional(), renderTotalFrames: nonnegative.int().optional(),
+  uptimeSeconds: nonnegative.optional(), hostname: name.optional(), platform: name.optional(),
+  outputActive: z.boolean().optional()
+});
+const outputState = z.object({ active: z.boolean(), state: name });
+const sceneEvent = z.object({ sceneName: name, isPreview: z.boolean().optional() });
+const obsEvents = new Map(Object.entries({
+  sceneChanged: sceneEvent, previewSceneChanged: sceneEvent,
+  streamStateChanged: outputState, recordStateChanged: outputState,
+  inputVolumeChanged: z.object({ inputName: name, volumeMul: nonnegative, volumeDb: z.number().optional() }),
+  inputMuteChanged: z.object({ inputName: name, muted: z.boolean() }),
+  mediaPlaybackEnded: z.object({ inputName: name })
+}));
 
 export class AgentGateway extends EventEmitter {
   constructor() {
@@ -23,20 +46,23 @@ export class AgentGateway extends EventEmitter {
       socket,
       metadata,
       connectedAt: new Date(),
+      awaitingPong: false,
+      telemetry: { obsConnected: false },
+      telemetryAt: null,
       pendingCommands: new Map() // correlationId -> { resolve, reject, timer }
     };
 
     this.connectedAgents.set(stationId, agentRecord);
     this.emit('agentConnected', { stationId, metadata });
 
+    socket.on('pong', () => { agentRecord.awaitingPong = false; });
     socket.on('message', (raw) => {
       if (this.connectedAgents.get(stationId) !== agentRecord) return;
+      let message;
       try {
-        const msg = JSON.parse(raw.toString());
-        this._handleAgentMessage(stationId, msg);
-      } catch (err) {
-        console.error(`[AgentGateway] Error parsing message from agent ${stationId}:`, err);
-      }
+        message = JSON.parse(raw.toString());
+      } catch { return; }
+      if (message && typeof message === 'object' && !Array.isArray(message)) this._handleAgentMessage(stationId, message);
     });
 
     socket.on('close', () => {
@@ -53,11 +79,42 @@ export class AgentGateway extends EventEmitter {
     return this.connectedAgents.has(stationId);
   }
 
+  stationStatus(stationId) {
+    const agent = this.connectedAgents.get(stationId);
+    if (!agent || agent.socket.readyState !== 1) return 'OFFLINE';
+    return agent.telemetry.obsConnected ? 'ONLINE' : 'DEGRADED';
+  }
+
+  sweepConnections(now = Date.now()) {
+    for (const [stationId, agent] of this.connectedAgents) {
+      if (agent.metadata.expiresAt <= now) {
+        this.disconnectAgent(stationId, 4003, 'Agent credentials expired');
+        continue;
+      }
+      if (agent.awaitingPong || agent.socket.readyState !== 1) {
+        this._cleanupAgent(stationId, agent);
+        agent.socket.terminate();
+        continue;
+      }
+      agent.awaitingPong = true;
+      agent.socket.ping();
+      if (agent.telemetryAt !== null && now - agent.telemetryAt >= TELEMETRY_TIMEOUT_MS) {
+        agent.telemetryAt = null;
+        agent.telemetry = { obsConnected: false };
+        this.emit('telemetry', { stationId, data: agent.telemetry });
+      }
+    }
+  }
+
   disconnectDeletedStation(stationId) {
+    this.disconnectAgent(stationId, 4004, 'Station deleted');
+  }
+
+  disconnectAgent(stationId, code, reason) {
     const agent = this.connectedAgents.get(stationId);
     if (!agent) return;
     this._cleanupAgent(stationId, agent);
-    agent.socket.close(4004, 'Station deleted');
+    agent.socket.close(code, reason);
   }
 
   /**
@@ -67,6 +124,9 @@ export class AgentGateway extends EventEmitter {
     const agent = this.connectedAgents.get(stationId);
     if (!agent || agent.socket.readyState !== 1) { // 1 = OPEN
       throw Object.assign(new Error('Station agent is offline or disconnected'), { statusCode: 503 });
+    }
+    if (agent.pendingCommands.size >= MAX_PENDING_COMMANDS || agent.socket.bufferedAmount > MAX_SEND_BUFFER) {
+      throw Object.assign(new Error('Station agent is busy. Retry when its command backlog clears.'), { statusCode: 503 });
     }
 
     const correlationId = crypto.randomUUID();
@@ -114,24 +174,26 @@ export class AgentGateway extends EventEmitter {
         const pending = agent.pendingCommands.get(msg.correlationId);
         clearTimeout(pending.timer);
         agent.pendingCommands.delete(msg.correlationId);
-        pending.reject(Object.assign(new Error(msg.error || 'Agent command execution failed'), { statusCode: 502 }));
+        const reason = typeof msg.error === 'string' && msg.error.length <= 300 ? msg.error : 'Agent command execution failed';
+        pending.reject(Object.assign(new Error(reason), { statusCode: 502 }));
       }
       return;
     }
 
     // Telemetry and Real-Time Event Sync
     if (msg.type === 'TELEMETRY') {
-      const agent = this.connectedAgents.get(stationId);
-      if (!agent) return;
-      agent.telemetry = msg.data;
-      agent.lastHeartbeat = new Date().toISOString();
-      this.emit('telemetry', { stationId, data: msg.data });
+      const parsed = telemetrySchema.safeParse(msg.data);
+      if (!agent || !parsed.success) return;
+      agent.telemetry = parsed.data;
+      agent.telemetryAt = Date.now();
+      agent.lastHeartbeat = new Date(agent.telemetryAt).toISOString();
+      this.emit('telemetry', { stationId, data: parsed.data });
       return;
     }
 
     if (msg.type === 'OBS_EVENT') {
-      this.emit('obsEvent', { stationId, event: msg.event, data: msg.data });
-      return;
+      const parsed = obsEvents.get(msg.event)?.safeParse(msg.data);
+      if (parsed?.success) this.emit('obsEvent', { stationId, event: msg.event, data: parsed.data });
     }
   }
 

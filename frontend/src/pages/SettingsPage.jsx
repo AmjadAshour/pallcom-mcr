@@ -26,6 +26,8 @@ export function SettingsPage() {
   const [pairingError, setPairingError] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [revoked, setRevoked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [codeStationId, setCodeStationId] = useState(null);
@@ -35,6 +37,7 @@ export function SettingsPage() {
 
   const handleGeneratePairingCode = async () => {
     setGenerating(true);
+    setRevoked(false);
     setPairingError('');
     setPairingCode('');
     try {
@@ -49,6 +52,25 @@ export function SettingsPage() {
       setGenerating(false);
     }
   };
+
+  async function revokeAgent() {
+    const message = ar
+      ? 'سيفقد MCR الاتصال بجهاز هذه المحطة فورًا. يلزم اقتران جديد لاستعادة التحكم. هل تريد المتابعة؟'
+      : 'MCR will immediately lose access to this station’s Agent. Pair it again to restore control. Continue?';
+    if (!window.confirm(message)) return;
+    setRevoking(true);
+    setPairingError('');
+    try {
+      await api(stationPath(targetId, '/agent/revoke'), { method: 'POST' });
+      setPairingCode('');
+      setRevoked(true);
+      await synchronize();
+    } catch (error) {
+      setPairingError(error.message);
+    } finally {
+      setRevoking(false);
+    }
+  }
 
   async function saveObsSettings(event) {
     event.preventDefault();
@@ -111,14 +133,14 @@ export function SettingsPage() {
               <Key className="w-4 h-4 text-amber-400" />
               <CardTitle>{ar ? 'اقتران جهاز OBS' : 'MCR Agent Device Pairing'}</CardTitle>
             </div>
-            <Button variant="outline" size="sm" onClick={handleGeneratePairingCode} disabled={!canPair || !station || generating || saving} className="text-xs">
+            <Button variant="outline" size="sm" onClick={handleGeneratePairingCode} disabled={!canPair || !station || generating || saving || revoking} className="text-xs">
               <RefreshCw className="w-3.5 h-3.5 me-1" />
               {ar ? 'إنشاء اقتران' : 'Generate pairing'}
             </Button>
           </CardHeader>
           <CardContent className="space-y-3">
-            <select aria-label={ar ? 'المحطة المراد اقترانها' : 'Station to pair'} value={station?.id || ''} disabled={generating || saving}
-              onChange={(event) => { setSearch({ pair: event.target.value }); setPairingCode(''); setPairingError(''); setSaved(false); }}
+            <select aria-label={ar ? 'المحطة المراد اقترانها' : 'Station to pair'} value={station?.id || ''} disabled={generating || saving || revoking}
+              onChange={(event) => { setSearch({ pair: event.target.value }); setPairingCode(''); setPairingError(''); setSaved(false); setRevoked(false); }}
               className="w-full rounded bg-zinc-900 p-2">
               {!station && <option value="">{ar ? 'اختر المحطة' : 'Select station'}</option>}
               {stations.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -127,6 +149,10 @@ export function SettingsPage() {
               ? (ar ? 'كلمة مرور OBS محفوظة' : 'OBS password saved')
               : (ar ? 'كلمة مرور OBS غير محفوظة' : 'OBS password is unset')}</p>}
             {pairingError && <p role="alert">{pairingError}</p>}
+            {revoked && <p role="status">{ar ? 'أُلغي اعتماد الجهاز. أنشئ اقترانًا جديدًا لاستعادة التحكم.' : 'Agent access revoked. Pair again to restore control.'}</p>}
+            {canPair && station && <Button variant="outline" size="sm" onClick={revokeAgent} disabled={revoking || generating || saving}>
+              {ar ? 'إلغاء اعتماد الجهاز' : 'Revoke Agent access'}
+            </Button>}
             <p className="text-xs text-zinc-400">
               {ar ? 'نزّل ملف المحطة وضعه بجانب تطبيق MCR Agent على جهاز OBS، ثم افتح التطبيق قبل انتهاء صلاحية الملف.' : 'Download the station file, place it next to MCR Agent on the OBS computer, and open the app before the file expires.'}
             </p>

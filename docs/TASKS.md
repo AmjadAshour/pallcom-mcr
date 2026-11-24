@@ -1,0 +1,16 @@
+# Task register
+
+| ID | Priority and dependencies | Work and components | Security and acceptance | Tests and evidence | Rollback | Status |
+|---|---|---|---|---|---|---|
+| P0-001 | P0, none | Baseline repository and compare 24 modules | Inspect without touching live facilities; inventory all modules | 20 baseline tests, project audit and matrix | Revert documentation only | VERIFIED |
+| P0-002 | P0, P0-001 | Bound Agent inputs and pending commands; report transport and OBS freshness separately | Reject malformed signals and strip unused fields; preserve authorized Agent RPC; degrade on stale metrics | G1 and G2 passed; simulated liveness and Agent RPC integration, with mocked playout | Revert gateway/controller changes together | VERIFIED |
+| P0-003A | P0, P0-001/P0-002 | Station Agent enrollment rotation and revocation | Scope to station and organization; invalidate prior credentials and codes; close old socket and audit atomically | AGENT_CREDENTIAL_GATES G1–G2 passed; 21 suite tests, both builds | Prefer a forward fix. A server downgrade that ignores generations requires signing-key rotation and Agent re-pairing to preserve revocation | VERIFIED |
+| P0-003 | P0, P0-001 | MFA, provisioning/recovery and tamper-evident audit | Require revocable factors and verified administrative recovery | Session/recovery cases and restored audit integrity check | Staged rollout with authorized recovery access | TODO |
+| P1-001 | P1, P0-002/P0-003 | Introduce isolated workers and a registry; typed control API and safe lifecycle | Least privilege, protected paths, bounded resources and default-deny egress | Isolated worker integration and teardown | Disable worker service; keep OBS adapter | TODO |
+| P1-002 | P1, P1-001 | Ingest and convert one known local reference signal | Structured inputs and separate media worker | Inspect output with independent probe; compare A/V timing | Stop worker pipeline; preserve existing OBS paths | TODO |
+| P1-003 | P1, P1-002 | Implement failover, alerting, live controls and media ops in phases 04–07 | Health hysteresis, explicit operator override and audit | Fault injection, actual OBS output, retention checks | Disable automation and take known backup | TODO |
+| P2-001 | P2, P1-003 | Remote production, distribution, broadcast standards and fleet in phases 08–11 | Approved egress, short-lived access, authorized devices and verified licenses | Device/provider interoperability, independent TS and restore checks | Disable individual integrations | TODO |
+| P3-001 | P3, P1-003 | Evaluate AI assistance in phase 12 | Operator override, opt-in and offline evaluation first | Labeled reference footage, accuracy and override tests | Disable AI suggestions | TODO |
+| P0-004 | P0 release gate, applicable phases | Production readiness | Approved deployment and rollback, no unresolved critical defects | Capacity, backup/restore and 1/8/24/72-hour soak as available | Restore last tested version and protected database backup | TODO |
+
+External acceptance environments are blocked until supplied: compatible PTZ/capture hardware, provisioned WebRTC/TURN, licensed CAS/watermark integrations and a representative staging output. Feature-specific evidence is in the matrix.

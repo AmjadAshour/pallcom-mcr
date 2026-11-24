@@ -97,8 +97,14 @@ apiRouter.post('/stations/:id/audio/mute', authenticate, authorize('station:cont
 apiRouter.post('/stations/:id/studio-mode/transition', authenticate, authorize('station:control'), ObsController.triggerStudioTransition);
 
 // Device Pairing Endpoints
-apiRouter.post('/pairing/generate', authenticate, authorize('station:manage'), PairingController.generate);
-apiRouter.post('/pairing/claim', authLimiter, PairingController.claim);
+apiRouter.post('/pairing/generate', authenticate, authorize('station:manage'),
+  validateBody(z.object({ stationId: z.string().min(1).max(100) }).strict()), PairingController.generate);
+apiRouter.post('/pairing/claim', authLimiter, validateBody(z.object({
+  pairingCode: z.string().regex(/^MCR-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$/),
+  machineHostname: z.string().max(255).optional(), osPlatform: z.string().max(64).optional(),
+  agentVersion: z.string().max(64).optional()
+}).strict()), PairingController.claim);
+apiRouter.post('/stations/:id/agent/revoke', authenticate, authorize('station:manage'), PairingController.revoke);
 
 // Audit Logs
 apiRouter.get('/logs', authenticate, authorize('audit:read'), AuditController.list);

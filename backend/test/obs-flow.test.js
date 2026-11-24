@@ -85,23 +85,31 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
   assert.equal((await refresh(cookie(activeLogin, 'mcr_refresh_token'))).status, 401);
   assert.equal((await fetch(address + '/api/v1/auth/me', { headers: { Authorization: 'Bearer ' + accessToken } })).status, 401);
 
-  const generated = await request('/pairing/generate', {
+  const generate = () => request('/pairing/generate', {
     method: 'POST', organizationId: admin.organizationId, body: { stationId: station.id }
   });
+  const connectAgent = (token) => new WebSocket(address.replace('http:', 'ws:') + '/agent-ws', {
+    headers: { 'x-station-id': station.id, 'x-agent-token': token }
+  });
+  const legacyToken = CryptoService.signAgentToken(station.id, admin.organizationId);
+  agent = connectAgent(legacyToken);
+  assert.equal(JSON.parse((await once(agent, 'message'))[0]).type, 'HANDSHAKE_ACK');
+  const legacyClosed = once(agent, 'close');
+  const generated = await generate();
   assert.equal(generated.status, 201);
   const { pairingCode } = await generated.json();
-  const claim = () => request('/pairing/claim', {
-    method: 'POST', body: { pairingCode, machineHostname: 'test', osPlatform: 'test', agentVersion: 'test' }
+  const claim = (code = pairingCode) => request('/pairing/claim', {
+    method: 'POST', body: { pairingCode: code, machineHostname: 'test', osPlatform: 'test', agentVersion: 'test' }
   });
   const claimed = await claim();
   assert.equal(claimed.status, 200);
   const { agentToken, obsConfig } = await claimed.json();
   assert.equal(obsConfig.password, 'OBS-integration-password');
   assert.equal((await claim()).status, 400);
+  assert.equal((await legacyClosed)[0], 4003);
+  assert.equal((await once(connectAgent(legacyToken), 'close'))[0], 4003);
 
-  agent = new WebSocket(address.replace('http:', 'ws:') + '/agent-ws', {
-    headers: { 'x-station-id': station.id, 'x-agent-token': agentToken }
-  });
+  agent = connectAgent(agentToken);
   const [handshake] = await once(agent, 'message');
   assert.equal(JSON.parse(handshake).type, 'HANDSHAKE_ACK');
   let program = 'Initial scene';
@@ -176,6 +184,19 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
   await RepositoryFactory.getUserRepository().update(admin.id, { role: 'SUPER_ADMIN', isActive: true });
   assert.equal((await request(stationPath, authorized)).status, 401);
   tokens.set(admin.organizationId, CryptoService.signAccessToken({ sub: admin.id, sid: createSession(admin.id).id }));
+  const { pairingCode: pendingCode } = await (await generate()).json();
+  const revokePath = stationPath + '/agent/revoke';
+  assert.equal((await request(revokePath, { method: 'POST', organizationId: 'another-organization' })).status, 404);
+  const revokedConnection = once(agent, 'close');
+  assert.equal((await request(revokePath, { ...authorized, method: 'POST' })).status, 200);
+  assert.equal((await revokedConnection)[0], 4003);
+  assert.equal((await once(connectAgent(agentToken), 'close'))[0], 4003);
+  assert.equal((await claim(pendingCode)).status, 400);
+  const { pairingCode: newCode } = await (await generate()).json();
+  const renewed = await claim(newCode);
+  assert.equal(renewed.status, 200);
+  agent = connectAgent((await renewed.json()).agentToken);
+  assert.equal(JSON.parse((await once(agent, 'message'))[0]).type, 'HANDSHAKE_ACK');
   const disconnected = once(agent, 'close');
   assert.equal((await request(stationPath, { ...authorized, method: 'DELETE' })).status, 200);
   assert.equal((await disconnected)[0], 4004);
@@ -185,10 +206,12 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
   for (const query of [
     'SELECT id FROM stations WHERE id = ?',
     'SELECT id FROM pairing_tokens WHERE stationId = ?',
-    'SELECT id FROM station_automations WHERE stationId = ?'
+    'SELECT id FROM station_automations WHERE stationId = ?',
+    'SELECT stationId FROM station_agent_credentials WHERE stationId = ?'
   ]) {
     assert.equal(db.prepare(query).get(station.id), undefined);
   }
   assert.equal(db.prepare("SELECT action FROM audit_logs WHERE resourceId = ? AND action = 'STATION_DELETED'").get(station.id).action,
     'STATION_DELETED');
+  assert.ok(db.prepare("SELECT id FROM audit_logs WHERE resourceId = ? AND action = 'AGENT_CREDENTIAL_REVOKED'").get(station.id));
 });
