@@ -107,3 +107,16 @@ export const OBS_COMMANDS = Object.freeze({
   SET_CURRENT_SCENE_TRANSITION: 'SetCurrentSceneTransition',
   SET_CURRENT_SCENE_TRANSITION_DURATION: 'SetCurrentSceneTransitionDuration'
 });
+
+export const PROGRAM_CANVAS = Object.freeze({ width: 1280, height: 720 });
+
+export function watermarkBounds({ anchor, x, y, size }, { width, height } = PROGRAM_CANVAS) {
+  const dx = Math.round(width * x / 100);
+  const dy = Math.round(height * y / 100);
+  const boxWidth = Math.min(width - dx, Math.max(1, Math.round(width * size / 100)));
+  const right = anchor.endsWith('right');
+  const bottom = anchor.startsWith('bottom');
+  return { left: right ? width - dx - boxWidth : dx, top: bottom ? 0 : dy,
+    width: boxWidth, height: height - dy, right, bottom };
+}
+export * from './ads.js';

@@ -104,6 +104,19 @@ export function getSqliteDatabase() {
       PRIMARY KEY (stationId, kind)
     );
 
+    CREATE TABLE IF NOT EXISTS program_ads (stationId TEXT PRIMARY KEY, plan TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS ad_assets (
+      stationId TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
+      frames INTEGER NOT NULL, media BLOB NOT NULL, PRIMARY KEY(stationId,id)
+    );
+    CREATE TABLE IF NOT EXISTS ad_frames (
+      stationId TEXT NOT NULL, asset TEXT NOT NULL, frame INTEGER NOT NULL, data BLOB NOT NULL,
+      PRIMARY KEY(stationId,asset,frame)
+    );
+    CREATE TABLE IF NOT EXISTS program_watermarks (
+      stationId TEXT PRIMARY KEY, revision INTEGER NOT NULL, settings TEXT NOT NULL, bitmap TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS station_playout (
       stationId TEXT PRIMARY KEY, plan TEXT NOT NULL, state TEXT NOT NULL,
       assets TEXT NOT NULL DEFAULT '[]'

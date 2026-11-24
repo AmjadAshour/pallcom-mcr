@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 import { env } from './config/env.js';
 import { apiRouter } from './presentation/routes/index.js';
 import { graphicsRouter } from './presentation/routes/graphics.js';
+import { watermarkRouter } from './presentation/routes/watermark.js';
+import { adsRouter } from './presentation/routes/ads.js';
 import { playoutRouter } from './presentation/routes/playout.js';
 import { attachPlayout, restorePlayout } from './infrastructure/playout/engine.js';
 import { errorHandler } from './presentation/middlewares/error.middleware.js';
@@ -40,6 +42,7 @@ app.use(cors({
 
 // 3. Body Parsing with Strict Size Limits
 app.use('/api/v1/stations/:id/graphics', express.json({ limit: '800kb' }));
+app.use('/api/v1/stations/:id/program/watermark', express.json({ limit: '800kb' }));
 app.use('/api/v1/stations/:id/playout', express.json({ limit: '512kb' }));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
@@ -70,6 +73,8 @@ app.get('/health', (req, res) => {
 // 6. Mount Versioned REST API
 app.use('/api/v1', apiRouter);
 app.use('/api/v1', graphicsRouter);
+app.use('/api/v1', watermarkRouter);
+app.use('/api/v1', adsRouter);
 app.use('/api/v1', playoutRouter);
 const webRoot = fileURLToPath(new URL('../../frontend/dist/', import.meta.url));
 app.use(express.static(webRoot));

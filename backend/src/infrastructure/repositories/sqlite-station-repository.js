@@ -142,6 +142,8 @@ export class SqliteStationRepository extends IStationRepository {
       if (changes) {
         this.db.prepare('DELETE FROM pairing_tokens WHERE stationId = ?').run(id);
         this.db.prepare('DELETE FROM station_graphics WHERE stationId = ?').run(id);
+        this.db.prepare('DELETE FROM program_watermarks WHERE stationId = ?').run(id);
+        for (const table of ['ad_assets','ad_frames','program_ads']) this.db.prepare('DELETE FROM ' + table + ' WHERE stationId=?').run(id);
         this.db.prepare('DELETE FROM station_graphics_tokens WHERE stationId = ?').run(id);
         this.db.prepare('DELETE FROM station_playout WHERE stationId = ?').run(id);
         this.db.prepare('DELETE FROM playout_as_run WHERE stationId = ?').run(id);

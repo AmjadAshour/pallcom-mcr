@@ -3,10 +3,11 @@ const refresh = () => request('/auth/refresh', { method: 'POST' });
 
 async function request(path, options) {
   const { method = 'GET', body, signal } = options;
+  const file = body instanceof Blob;
   const response = await fetch('/api/v1' + path, {
     method, signal, credentials: 'same-origin',
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body)
+    headers: body === undefined ? undefined : { 'Content-Type': file ? body.type : 'application/json' },
+    body: file ? body : body === undefined ? undefined : JSON.stringify(body)
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || result.success !== true) {

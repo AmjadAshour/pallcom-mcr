@@ -1,6 +1,7 @@
 import React from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { ProgramPreview } from '../components/ProgramPreview.jsx';
+import { IndependentProgram } from '../components/IndependentProgram.jsx';
 import { useMcrStore } from '../context/useMcrStore.js';
 import { translations } from '../i18n/translations.js';
 import { Card, CardHeader, CardTitle, CardContent, Button, TallyIndicator, TBarSlider } from '@mcr/ui';
@@ -85,6 +86,8 @@ export function LiveControlPage() {
       </div>
 
       {/* Broadcast Dual Deck: Preview & Program */}
+      <IndependentProgram key={currentStation.id} stationId={currentStation.id} language={language}
+        canControl={user.permissions.includes('*') || user.permissions.includes('station:control')} />
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
         {/* PREVIEW DECK (Green Tally) */}
         <div className="lg:col-span-5 flex flex-col">

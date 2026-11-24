@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AutomationController } from '../controllers/automation.controller.js';
+import { independentProgram } from '../controllers/program.controller.js';
 import { RepositoryFactory } from '../../infrastructure/repositories/repository-factory.js';
 import { CryptoService } from '../../infrastructure/security/crypto-service.js';
 import { Router } from 'express';
@@ -62,6 +63,9 @@ apiRouter.patch('/stations/:id', authenticate, authorize('station:manage'), vali
 apiRouter.delete('/stations/:id', authenticate, authorize('station:manage'), StationController.delete);
 
 // OBS Control Endpoints (RBAC protected)
+apiRouter.get('/stations/:id/program', authenticate, authorize('station:read'), independentProgram);
+apiRouter.post('/stations/:id/program', authenticate, authorize('station:control'),
+  validateBody(z.object({ action: z.enum(['start', 'stop', 'obs', 'fallback']) }).strict()), independentProgram);
 apiRouter.get('/stations/:id/scenes', authenticate, authorize('station:read'), ObsController.getScenes);
 apiRouter.get('/stations/:id/snapshot', authenticate, authorize('station:read'), ObsController.stationCommand('GetStationSnapshot'));
 apiRouter.get('/stations/:id/preview-image', authenticate, authorize('station:read'),

@@ -28,3 +28,9 @@ Target capabilities follow the [public MCR Box feature inventory](https://mcrbox
 | 22 | TS analyzer | MISSING | No TR 101 290 component found | Independent analyzer and known-good/fault TS fixtures |
 | 23 | Recording | PARTIAL | OBS recording controls and scheduled jobs | Retention, quotas, downloads and recovery evidence |
 | 24 | Fleet / redundancy | PARTIAL | Station-scoped pairing, credential rotation/revocation and liveness telemetry | Independent workers, leases, redundancy and measured recovery |
+
+Phase 2 staging evidence extends rows 1, 6 and 12. One opt-in worker decodes a localhost H.264/AAC MPEG-TS input, switches to/from a generated slate, and encodes an independent 720p25 Program. A separate receiver confirmed real OBS signal loss and manual return. Production and broader protocol qualification remain open. [Evidence](INDEPENDENT_PROGRAM_STAGING.md)
+
+Row 7 also includes a global, persisted watermark on the independent encoder. Its Preview/Apply workflow, proportional layout and source-independent stacking have local 720p receiver evidence. [Watermark operating procedure](INDEPENDENT_PROGRAM_STAGING.md)
+
+Independent Program advertising extends row 7 with a station creative library, scheduled image/video playlists, four composited placements and manual controls. Local receiver evidence covers position, size, stacking, motion, fades, gaps and rotation. [Operating and acceptance details](INDEPENDENT_PROGRAM_STAGING.md)

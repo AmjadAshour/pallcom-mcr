@@ -12,7 +12,7 @@ export const graphicsRouter = Router();
 const kinds = ['ad', 'logo', 'ticker'];
 const root = '/stations/:id/graphics';
 
-function decodeImage(image) {
+export function decodeImage(image) {
   const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(image);
   if (!match) return null;
   const [, type, encoded] = match;

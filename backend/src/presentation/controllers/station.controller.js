@@ -2,6 +2,7 @@ import { RepositoryFactory } from '../../infrastructure/repositories/repository-
 import { CryptoService } from '../../infrastructure/security/crypto-service.js';
 import { agentGateway } from '../../infrastructure/agent/agent-gateway.js';
 import { removeStationPlayout } from '../../infrastructure/playout/engine.js';
+import { configured, stopProgram } from '../../infrastructure/program/supervisor.js';
 
 export class StationController {
   static async list(req, res, next) {
@@ -171,6 +172,7 @@ export class StationController {
       }
       agentGateway.disconnectDeletedStation(id);
       removeStationPlayout(id);
+        if (configured(id)) stopProgram();
 
       await auditRepo.create({
         organizationId: req.user.organizationId,
