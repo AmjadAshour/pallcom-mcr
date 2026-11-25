@@ -38,10 +38,15 @@ export function rotateSession(claims, refresh) {
 }
 
 export function sessionUser(claims) {
-  if (!claims.sid || !claims.sub || claims.exp * 1000 <= Date.now()) return null;
+  if (claims.exp * 1000 <= Date.now()) return null;
+  return activeSessionUser(claims.sid, claims.sub);
+}
+
+export function activeSessionUser(id, userId) {
+  if (!id || !userId) return null;
   return getSqliteDatabase().prepare(`
     SELECT u.id, u.email, u.role, COALESCE(u.organizationId, 'default-org') AS organizationId
     FROM auth_sessions AS s JOIN users AS u ON u.id = s.userId
     WHERE s.id = ? AND s.userId = ? AND s.expiresAt > ? AND u.isActive = 1
-  `).get(claims.sid, claims.sub, Date.now()) ?? null;
+  `).get(id, userId, Date.now()) ?? null;
 }

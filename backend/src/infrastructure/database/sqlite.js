@@ -105,6 +105,18 @@ export function getSqliteDatabase() {
       PRIMARY KEY (stationId, kind)
     );
 
+    CREATE TABLE IF NOT EXISTS program_schedule (
+      id TEXT PRIMARY KEY, stationId TEXT NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+      userId TEXT NOT NULL, sceneId TEXT NOT NULL, scene TEXT NOT NULL,
+      dueAt INTEGER NOT NULL, state TEXT NOT NULL, executedAt INTEGER, error TEXT,
+      UNIQUE(stationId,dueAt)
+    );
+    CREATE TABLE IF NOT EXISTS program_schedule_hold (
+      stationId TEXT PRIMARY KEY REFERENCES stations(id) ON DELETE CASCADE, resumedAt INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS program_schedule_daily (
+      jobId TEXT PRIMARY KEY REFERENCES program_schedule(id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS program_resume_source (
       stationId TEXT PRIMARY KEY REFERENCES stations(id) ON DELETE CASCADE, selection TEXT NOT NULL
     );

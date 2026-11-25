@@ -10,6 +10,7 @@ import { programPath, programRuntimePort } from './infrastructure/program/runtim
 import { getSqliteDatabase } from './infrastructure/database/sqlite.js';
 import { setSourceRecovery, startConfiguredProgram } from './infrastructure/program/supervisor.js';
 import { restoreProgramSource } from './infrastructure/program/resume-source.js';
+import { startProgramSchedule } from './infrastructure/program/schedule.js';
 
 const port = programRuntimePort(process.env.MCR_PROGRAM_RUNTIME_PORT);
 if (!port || !process.env.MCR_PROGRAM_STATION_ID || env.STORAGE_MODE !== 'sqlite') {
@@ -31,6 +32,7 @@ app.use('/api/v1', apiRouter, watermarkRouter, adsRouter, scenesRouter);
 app.use(errorHandler);
 app.listen(port, '127.0.0.1', async () => {
   console.log('Program runtime listening on loopback');
+  startProgramSchedule(process.env.MCR_PROGRAM_STATION_ID);
   if (process.env.MCR_PROGRAM_AUTOSTART !== '1') return;
   try {
     const id = process.env.MCR_PROGRAM_STATION_ID;

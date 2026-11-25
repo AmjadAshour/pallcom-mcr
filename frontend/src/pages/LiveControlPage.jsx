@@ -87,6 +87,7 @@ export function LiveControlPage() {
 
       {/* Broadcast Dual Deck: Preview & Program */}
       <IndependentProgram key={currentStation.id} stationId={currentStation.id} language={language}
+        canSchedule={user.permissions.includes('*') || user.permissions.includes('schedule:manage')}
         canControl={user.permissions.includes('*') || user.permissions.includes('station:control')} />
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
         {/* PREVIEW DECK (Green Tally) */}

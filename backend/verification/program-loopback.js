@@ -12,6 +12,8 @@ process.env.MCR_PROGRAM_STATION_ID = station;
 process.env.MCR_PROGRAM_SLATE = 'blue';
 process.env.MCR_PROGRAM_INPUT_PORT ||= '25100';
 process.env.MCR_PROGRAM_OUTPUT_PORT ||= '25102';
+const mixFixture = process.env.MCR_TEST_AUDIO_MIX === '1';
+if (mixFixture) process.env.MCR_PROGRAM_SECOND_INPUT_PORT = '25104';
 const inputHost = process.env.MCR_PROGRAM_INPUT_HOST || '127.0.0.1';
 const input = 'udp://' + inputHost + ':' + process.env.MCR_PROGRAM_INPUT_PORT;
 const output = 'udp://127.0.0.1:' + process.env.MCR_PROGRAM_OUTPUT_PORT;
@@ -24,7 +26,37 @@ decoder.stderr.setEncoding('utf8').on('data', chunk => { decoderErrors = (decode
 let frames = 0, rgb, remainder = Buffer.alloc(0);
 let rms = 0;
 let audioChunks = 0;
+const mixedTones = { primary: 0, secondary: 0 };
+const toneHistory = [];
+const toneSampleCount = 800;
+let toneSamples = [];
+let bufferedByte = Buffer.alloc(0);
+function amplitude(sample, frequency) {
+  let cosine = 0, sine = 0;
+  for (let i = 0; i < sample.length; i++) {
+    const angle = i * 2 * Math.PI * frequency / 8000;
+    cosine += sample[i] * Math.cos(angle);
+    sine += sample[i] * Math.sin(angle);
+  }
+  return 2 * Math.hypot(cosine, sine) / sample.length;
+}
 decoder.stdio[3].on('data', chunk => {
+  if (mixFixture) {
+    const pcm = Buffer.concat([bufferedByte, chunk]);
+    const end = pcm.length - pcm.length % 2;
+    for (let offset = 0; offset < end; offset += 2) {
+      toneSamples.push(pcm.readInt16LE(offset));
+      if (toneSamples.length !== toneSampleCount) continue;
+      toneHistory.push({ primary:amplitude(toneSamples, 880), secondary:amplitude(toneSamples, 440) });
+      if (toneHistory.length > 5) toneHistory.shift();
+      for (const key of ['primary', 'secondary']) {
+        const sorted = toneHistory.map(reading => reading[key]).sort((a, b) => a - b);
+        mixedTones[key] = sorted[Math.floor(sorted.length / 2)];
+      }
+      toneSamples = [];
+    }
+    bufferedByte = pcm.subarray(end);
+  }
   let sum = 0;
   const count = Math.floor(chunk.length / 2);
   for (let i = 0; i < count; i++) sum += chunk.readInt16LE(i * 2) ** 2;
@@ -40,7 +72,8 @@ decoder.stdout.on('data', chunk => {
 async function until(label, predicate, timeout = 20000) {
   const start = Date.now();
   while (!predicate()) {
-    if (Date.now() - start > timeout) throw Error(label + ' timed out: ' + JSON.stringify({ rgb, frames, status: programStatus(station) }));
+    if (Date.now() - start > timeout) throw Error(label + ' timed out: ' +
+      JSON.stringify({ rgb, frames, ...(mixFixture && { mixedTones }), status:programStatus(station) }));
     await sleep(50);
   }
   console.log(label, JSON.stringify({ frames, rgb: [...(rgb || [])], ...programStatus(station) }));
@@ -48,7 +81,7 @@ async function until(label, predicate, timeout = 20000) {
 const blue = () => rgb && rgb[2] > 180 && rgb[0] < 50;
 const red = () => rgb && rgb[0] > 180 && rgb[2] < 50;
 const ready = () => programStatus(station).obs === 'ready';
-const send = (action, gainDb) => programAction(station, action, undefined, undefined, gainDb);
+const send = (action, setting) => programAction(station, action, undefined, undefined, setting);
 const urlFixture = process.env.MCR_TEST_INPUT_URL === '1';
 const blackFixture = process.env.MCR_TEST_BLACK_INPUT === '1';
 const freezeFixture = process.env.MCR_TEST_FREEZE_INPUT === '1';
@@ -57,6 +90,7 @@ if (blackFixture) process.env.MCR_PROGRAM_BLACK_SECONDS = '2';
 if (freezeFixture) process.env.MCR_PROGRAM_FREEZE_SECONDS = '2';
 if (silenceFixture) process.env.MCR_PROGRAM_SILENCE_SECONDS = '2';
 let sender;
+let secondSender;
 let redirects = 0;
 let redirectedRequests = 0;
 const http = urlFixture && createServer((req, res) => {
@@ -167,6 +201,36 @@ try {
     rms / baseline < 0.32 && programStatus(station).programAudioDbfs <= -30);
   assert.equal((await send('gain', 0)).programGainDb, 0);
   await until('Receiver level restored', () => red() && rms / baseline > 0.8 && rms / baseline < 1.2);
+  if (mixFixture) {
+    secondSender = ffmpeg(['-re', '-f', 'lavfi', '-i', 'color=white:s=640x360:r=25', '-f', 'lavfi',
+      '-i', 'sine=frequency=440:sample_rate=48000', '-c:v', 'libx264', '-tune', 'zerolatency',
+      '-g', '25', '-c:a', 'aac', '-f', 'mpegts', 'udp://127.0.0.1:25104?pkt_size=1316']);
+    await until('Default audio follows the red picture', () => programStatus(station).obs2 === 'ready' &&
+      red() && mixedTones.primary > 500 && mixedTones.secondary < 30);
+    const route = (input, mode, gainDb = 0) => send('input-audio', { input, mode, gainDb });
+    await assert.rejects(route('obs2', 'on', 2), /Invalid Program input audio/);
+    assert.equal((await route('obs2', 'on')).inputAudioMix.obs2.routed, true);
+    await until('Independent receiver decodes both tones with primary picture', () =>
+      red() && mixedTones.primary > 500 && mixedTones.secondary > 500);
+    const secondaryReference = mixedTones.secondary;
+    await route('obs2', 'on', -12);
+    await until('Independent receiver measures secondary attenuation only', () => red() &&
+      mixedTones.primary > 500 && mixedTones.secondary / secondaryReference > 0.20 &&
+      mixedTones.secondary / secondaryReference < 0.32);
+    await route('obs', 'off');
+    await until('Muted first input leaves the other tone and the primary picture', () =>
+      red() && mixedTones.primary < 30 && mixedTones.secondary > 100);
+    await send('mute');
+    await until('Master mute silences the mix', () => red() && mixedTones.primary < 30 && mixedTones.secondary < 30);
+    await send('unmute');
+    await send('fallback');
+    await until('Explicitly mixed secondary persists under the slate', () =>
+      blue() && mixedTones.primary < 30 && mixedTones.secondary > 100);
+    secondSender.kill();
+    await until('Lost secondary input is removed from the mix', () => blue() && programStatus(station).obs2 === 'disconnected' &&
+      !programStatus(station).inputAudioMix.obs2.routed && mixedTones.secondary < 30);
+    console.log('Independent input audio mix passed');
+  }
   assert.equal(programStatus(station).session, session);
   assert.doesNotMatch(decoderErrors, /non.monoton|backward in time/i);
   console.log('Program audio timestamp continuity passed');
@@ -183,6 +247,7 @@ try {
   }
 } finally {
   sender?.kill();
+  secondSender?.kill();
   decoder.kill();
   await send('stop');
   http?.close?.();

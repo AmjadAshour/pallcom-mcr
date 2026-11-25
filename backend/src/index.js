@@ -22,6 +22,7 @@ import { setupAgentWsServer } from './infrastructure/agent/agent-ws-server.js';
 import { RepositoryFactory } from './infrastructure/repositories/repository-factory.js';
 import { CryptoService } from './infrastructure/security/crypto-service.js';
 import { forwardProgram, programRuntimePort } from './infrastructure/program/runtime-proxy.js';
+import { startProgramSchedule } from './infrastructure/program/schedule.js';
 
 const logger = pino({ level: env.LOG_LEVEL });
 const app = express();
@@ -137,6 +138,7 @@ if (process.env.NODE_ENV !== 'test') {
     await initDefaultData();
     startAutomationWorker();
     restorePlayout();
+    if (!runtimePort) startProgramSchedule(process.env.MCR_PROGRAM_STATION_ID);
   });
 }
 

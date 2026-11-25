@@ -103,3 +103,31 @@ Opt-in runtime boot starts Program on slate using persisted graphic and ad revis
 Added opt-in recovery of the last successful operator source selection on Program runtime boot. A new session starts on slate and network recovery waits for readiness within a bounded window. Unset MCR_PROGRAM_RESTORE_SOURCE to revert.
 
 Verified local-scene restart with independently decoded video and audio, then removed the first video frame in fixture SQLite and verified safe slate. Live Control displays unavailable or waiting during recovery. The status UI can be reverted independently.
+
+Added one-shot named scene scheduling for independent Program. Pending events are cancellable and the schedule log records engine acceptance or failure. To roll back, remove the scheduler and its scene editor controls together. Existing saved scenes are separate from scheduled events.
+
+Added optional 24-hour recurrence for scheduled scene takes. Claim and creation of the next occurrence share a transaction. Cancelling the pending occurrence ends the series. To revert, remove the recurrence controls and scheduler extension while retaining existing pending events as one-shot takes.
+
+Added atomic one-shot sequences of up to 32 named scenes with cumulative take times. Existing scheduler records acceptance for each take. Remove the sequence endpoint and editor controls to revert; saved events remain ordinary scheduled takes.
+
+Optional local filler is appended as a scheduled take at the end of a scene sequence. Filler participates in atomic conflict detection and uses the same execution log. Choose the keep-final-scene option to revert the behavior for new sequences.
+
+Added a persisted schedule hold for operator overrides. Due events are logged as skipped while recurrence continues. Remove the hold controls and claim check together to roll back.
+
+Added station-scoped UTF-8 CSV schedule export with UTC timestamps and spreadsheet formula escaping. Separate runtime proxy preserves the attachment header. Remove the export route and link together to roll back.
+
+Added pending event rescheduling with an expected original timestamp and atomic conflict protection. The daily marker stays attached to the same event. Revert the PATCH endpoint and editor controls together to remove rescheduling.
+
+Program fans out the same encoded MPEG-TS to optional primary and secondary SRT callers and local UDP. Each SRT caller has a separate bounded queue, worker thread, retry state and server-side encryption setting. Live Control reports each caller state. The loopback receiver test decoded H.264 and AAC on all three outputs, then confirmed continued decoding on the second SRT receiver during loss and reconnection of the first without changing the Program session. External delivery remains open. Unset both secondary SRT variables before starting a new session to roll back to one SRT destination.
+
+Optional SRT destination probes report recent decoded H.264 and AAC independently of sender state. Destination-scoped bearer credentials authorize reports only. Program status expires reports after eight seconds and waits for fresh evidence on a new session. The encrypted loopback probe decoded both tracks, went offline when stopped and recovered in the same broadcast session. Station, destination and credential checks and synthetic single-track reports were exercised by the acceptance fixture. External HTTPS reporting and receiver deployment remain open. Stop the probe and unset its server token to disable monitoring.
+
+Independent Program can mix two network inputs. Operators can set follow-picture, mix-when-ready or mute and apply -30 to 0 dB per input with station-control authorization. The worker retains the single output audio clock and removes sources that lose readiness. Separate FFmpeg UDP decoding measured both test tones together, secondary-only attenuation, per-input and master mute, explicit audio under slate, and silence after secondary loss. Long-run synchronization remains open. Return inputs to follow-picture at 0 dB to restore default routing.
+
+Live Control adds user-initiated listening to a station-scoped MP3 monitor from the final Program audio mix. Chrome played it with a viewer session. An independent FFmpeg fixture decoded the monitor and the UDP broadcast concurrently and verified tone, mute, gain and restoration. It also verified that revoking the viewer session closes the monitor while UDP continues, and that stopping Program closes active listeners. Browser support beyond Chrome, production proxy buffering and long-run latency remain open. Set MCR_PROGRAM_AUDIO_MONITOR=0 before starting the next session to disable the branch.
+
+Independent Program can serve a private, single-rendition HLS playlist and segments using the existing read authorization. Its separate packaging graph isolates write failures. Separate receivers verified HLS audio and video, range access, retention and continued UDP decoding during a packaging failure. Live Control lists recent HLS and SRT incidents for the current session. The SRT fixture verified a single failure and recovery event for the affected destination while the other remained on air. Unset MCR_PROGRAM_HLS_DIR before starting the next session to disable HLS.
+
+Host-side recovery tools can snapshot active SQLite, restore to a new file and verify database integrity. Staging exercised an uncommitted update and a stored creative, with overwrite refused. The readiness observer decoded UDP audio and video over a 60-second fault drill and detected loss and restart. A separate capture analyzer detected injected continuity loss in a delivered HLS segment. These tools require no changes to live configuration. [Readiness and rollback](BROADCAST_READINESS_AR.md)
+
+The input decoder now clocks both tracks before feeding them into Program and limits contribution audio buffering to four buffers. The receiver flash-and-tone test measured at most 85 ms in the latest isolated run, with a 150 ms observation under concurrent local load. A separate fix restores opt-out semantics for silence detection at zero. The combined Phase 7 fixture exercises the native scene, the direct MPEG-TS URL, actual portable OBS, and browser refresh and closure in isolated staging.

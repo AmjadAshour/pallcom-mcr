@@ -12,7 +12,7 @@ Target capabilities follow the [public MCR Box feature inventory](https://mcrbox
 | 6 | Live switching | PARTIAL | LiveControlPage and OBS v5 scene commands | Actual Program output, keying and frame timing |
 | 7 | Graphics | PARTIAL | GraphicsPage, overlay route and OBS text sources | Templates, scoreboards and isolated third-party graphics |
 | 8 | Replay | PARTIAL | OBS replay buffer start/stop/save controls and OBS save-event timestamp | OBS staging verification, clip playback, marks, variable speed and export |
-| 9 | Audio mixing | PARTIAL | AudioMixerPage and OBS input controls | Delay, EQ, compression, routing and track verification |
+| 9 | Audio mixing | PARTIAL | Independent Program mixer for two network inputs and station-scoped operator listening to the final mix. Local decoders verified simultaneous tones, attenuation, mute and source loss. Chrome played the audio monitor. | Delay, EQ, compression and long-run synchronization |
 | 10 | Loudness | MISSING | OBS channel levels are available | LUFS, true peak and independent reference measurements |
 | 11 | AI directing | MISSING | No tracking model found | Representative footage, evaluation and operator override |
 | 12 | Format conversion | MISSING | Media probe reads metadata | Worker conversion and independent A/V validation |
@@ -20,12 +20,12 @@ Target capabilities follow the [public MCR Box feature inventory](https://mcrbox
 | 14 | Captions | MISSING | No timed multilingual caption pipeline found | Caption import, output and timing fixtures |
 | 15 | SCTE-35 | MISSING | No cue processing found | Independent analyzer verification |
 | 16 | Watermark | PARTIAL | Visible station logo supported | Licensed forensic watermark provider and detection evidence |
-| 17 | IP routing | MISSING | Station Agent RPC is a control tunnel | Media fan-out and protocol conversion benchmarks |
-| 18 | HLS / DASH origin | MISSING | No implemented packager found | ABR manifests, signed links and cleanup |
+| 17 | IP routing | PARTIAL | Independent Program fans out MPEG-TS over local UDP and two optional SRT callers. Independent receivers verified loss isolation. An optional destination probe reported decoded audio and video, loss and recovery on encrypted loopback SRT. | External receiver and HTTPS telemetry qualification, other delivery protocols and throughput benchmarks |
+| 18 | HLS / DASH origin | PARTIAL | Optional station-authorized single-rendition HLS from Independent Program, with bounded segments. FFmpeg decoded local HLS and UDP together. | ABR, DASH, production HTTPS and throughput |
 | 19 | DVB multiplexer | MISSING | No MPEG-TS multiplex worker found | PID/SI/PSI continuity and independent DVB tests |
 | 20 | Conditional access | MISSING | No CAS integration found | Licensed vendor, secure key workflow and validation |
-| 21 | Multiview | PARTIAL | OBS snapshots, Program/Preview, sortable tiles, fullscreen, measured bitrate and per-input peak levels | Live OBS verification, measured latency and independent encoded output |
-| 22 | TS analyzer | MISSING | No TR 101 290 component found | Independent analyzer and known-good/fault TS fixtures |
+| 21 | Multiview | PARTIAL | OBS snapshots, sortable tiles, fullscreen and bitrate. Independent Live Control displays two input previews and the Program picture, meters, and on-demand audio. | Live OBS verification, measured latency and large station layouts |
+| 22 | TS analyzer | PARTIAL | Offline header and PID continuity scan detected injected packet loss in a captured HLS MPEG-TS segment. | PCR, PSI validation and TR 101 290 coverage |
 | 23 | Recording | PARTIAL | OBS recording controls and scheduled jobs | Retention, quotas, downloads and recovery evidence |
 | 24 | Fleet / redundancy | PARTIAL | Station-scoped pairing, credential rotation/revocation and liveness telemetry | Independent workers, leases, redundancy and measured recovery |
 

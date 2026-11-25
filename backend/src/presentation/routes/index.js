@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AutomationController } from '../controllers/automation.controller.js';
-import { independentMonitor, independentProgram } from '../controllers/program.controller.js';
+import { independentAudioMonitor, independentHls, independentMonitor, independentProgram, reportProgramReceiver } from '../controllers/program.controller.js';
+import { programInputAudioSchema } from '../../infrastructure/program/supervisor.js';
 import { RepositoryFactory } from '../../infrastructure/repositories/repository-factory.js';
 import { CryptoService } from '../../infrastructure/security/crypto-service.js';
 import { Router } from 'express';
@@ -64,12 +65,17 @@ apiRouter.delete('/stations/:id', authenticate, authorize('station:manage'), Sta
 
 // OBS Control Endpoints (RBAC protected)
 apiRouter.get('/stations/:id/program', authenticate, authorize('station:read'), independentProgram);
+apiRouter.post('/stations/:id/program/receivers/:destination',
+  validateBody(z.object({ video: z.boolean(), audio: z.boolean() }).strict()), reportProgramReceiver);
 apiRouter.get(['/stations/:id/program/input-preview', '/stations/:id/program/program-monitor'],
   authenticate, authorize('station:read'), independentMonitor);
+apiRouter.get('/stations/:id/program/audio-monitor', authenticate, authorize('station:read'), independentAudioMonitor);
+apiRouter.get('/stations/:id/program/hls/:session/:filename', authenticate, authorize('station:read'), independentHls);
 apiRouter.post('/stations/:id/program', authenticate, authorize('station:control'),
   validateBody(z.union([
     z.object({ action: z.enum(['start', 'stop', 'obs', 'fallback', 'mute', 'unmute']) }).strict(),
-    z.object({ action: z.literal('gain'), gainDb: z.number().int().min(-30).max(0) }).strict()
+    z.object({ action: z.literal('gain'), gainDb: z.number().int().min(-30).max(0) }).strict(),
+    z.object({ action: z.literal('input-audio'), inputAudio: programInputAudioSchema }).strict()
   ])), independentProgram);
 apiRouter.get('/stations/:id/scenes', authenticate, authorize('station:read'), ObsController.getScenes);
 apiRouter.get('/stations/:id/snapshot', authenticate, authorize('station:read'), ObsController.stationCommand('GetStationSnapshot'));
