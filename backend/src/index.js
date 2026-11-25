@@ -12,6 +12,7 @@ import { apiRouter } from './presentation/routes/index.js';
 import { graphicsRouter } from './presentation/routes/graphics.js';
 import { watermarkRouter } from './presentation/routes/watermark.js';
 import { adsRouter } from './presentation/routes/ads.js';
+import { scenesRouter } from './presentation/routes/scenes.js';
 import { playoutRouter } from './presentation/routes/playout.js';
 import { attachPlayout, restorePlayout } from './infrastructure/playout/engine.js';
 import { errorHandler } from './presentation/middlewares/error.middleware.js';
@@ -20,6 +21,7 @@ import { setupSocketGateway } from './infrastructure/realtime/socket-gateway.js'
 import { setupAgentWsServer } from './infrastructure/agent/agent-ws-server.js';
 import { RepositoryFactory } from './infrastructure/repositories/repository-factory.js';
 import { CryptoService } from './infrastructure/security/crypto-service.js';
+import { forwardProgram, programRuntimePort } from './infrastructure/program/runtime-proxy.js';
 
 const logger = pino({ level: env.LOG_LEVEL });
 const app = express();
@@ -40,13 +42,6 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-// 3. Body Parsing with Strict Size Limits
-app.use('/api/v1/stations/:id/graphics', express.json({ limit: '800kb' }));
-app.use('/api/v1/stations/:id/program/watermark', express.json({ limit: '800kb' }));
-app.use('/api/v1/stations/:id/playout', express.json({ limit: '512kb' }));
-app.use(express.json({ limit: '100kb' }));
-app.use(express.urlencoded({ extended: true, limit: '100kb' }));
-app.use(cookieParser());
 app.use('/api', (req, res, next) => {
   const origin = req.get('Origin');
   if (!origin || ['GET', 'HEAD', 'OPTIONS'].includes(req.method) || origin === env.CORS_ORIGIN) return next();
@@ -56,6 +51,20 @@ app.use('/api', (req, res, next) => {
 
 // 4. Rate Limiting on API endpoints
 app.use('/api', apiLimiter);
+
+const runtimePort = programRuntimePort(process.env.MCR_PROGRAM_RUNTIME_PORT);
+if (runtimePort) {
+  if (runtimePort === env.PORT || !process.env.MCR_PROGRAM_STATION_ID || env.STORAGE_MODE !== 'sqlite') {
+    throw new Error('Separate Program runtime requires its own port, station ID and SQLite storage');
+  }
+  app.use(forwardProgram(runtimePort));
+}
+app.use('/api/v1/stations/:id/graphics', express.json({ limit: '800kb' }));
+app.use('/api/v1/stations/:id/program/watermark', express.json({ limit: '800kb' }));
+app.use('/api/v1/stations/:id/playout', express.json({ limit: '512kb' }));
+app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
+app.use(cookieParser());
 
 // 5. API Health Check
 app.get('/health', (req, res) => {
@@ -75,6 +84,7 @@ app.use('/api/v1', apiRouter);
 app.use('/api/v1', graphicsRouter);
 app.use('/api/v1', watermarkRouter);
 app.use('/api/v1', adsRouter);
+app.use('/api/v1', scenesRouter);
 app.use('/api/v1', playoutRouter);
 const webRoot = fileURLToPath(new URL('../../frontend/dist/', import.meta.url));
 app.use(express.static(webRoot));

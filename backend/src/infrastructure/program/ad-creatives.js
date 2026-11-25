@@ -57,6 +57,22 @@ export async function prepareCreative(bytes, mime) {
       '25/2',
       '-i',
       '%04d.jpg',
+      '-protocol_whitelist',
+      'file',
+      '-f',
+      'mov',
+      '-i',
+      'input.mp4',
+      '-map',
+      '0:v:0',
+      '-map',
+      '1:a:0?',
+      '-t',
+      String(names.length * 0.08),
+      '-af',
+      'apad',
+      '-c:a',
+      'aac',
       '-c:v',
       'libx264',
       '-pix_fmt',
@@ -69,7 +85,16 @@ export async function prepareCreative(bytes, mime) {
     ]);
     const frames = [];
     for (const name of names) frames.push(await readFile(join(directory, name)));
-    return { kind: 'video', media: await readFile(join(directory, 'preview.mp4')), frames };
+    try {
+      await ffmpeg(['-i', 'preview.mp4', '-vn', '-ac', '2', '-ar', '48000', '-f', 's16le', 'scene.pcm']);
+    } catch (error) {
+      if (!/Output file does not contain any stream/i.test(error.stderr ?? '')) throw error;
+    }
+    const pcm = await readFile(join(directory, 'scene.pcm')).catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+      return null;
+    });
+    return { kind: 'video', media: await readFile(join(directory, 'preview.mp4')), frames, pcm };
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

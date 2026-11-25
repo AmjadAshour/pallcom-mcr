@@ -45,3 +45,61 @@ Added a station-scoped image/video library, four independent placement playlists
 ## Independent Program initiative — Phase 7 staging acceptance
 
 Full workflow acceptance failed on native scene composition and URL Preview/take. A combined local run exercised actual OBS, a separate picture/audio receiver, watermark, two ad placements, browser refresh, controlled service restart and fault recovery. Fixed RGB watermark opacity handling and added a regression. See the [scenario matrix, evidence and rollback](PHASE_7_ACCEPTANCE.md) and [operator quick guide](STAGING_OPERATOR_GUIDE.md).
+
+## Independent local scene slice
+
+A station can save and take one local scene containing an imported looping silent video with a positioned image. The browser previews its draft. The separate receiver fixture verified slate before Take, motion and both graphics layers during the take, and the return to slate in the same session. See the [staging runbook](INDEPENDENT_PROGRAM_STAGING.md) for operation and rollback. Network input and a worker-side Preview bus remain open.
+
+Local scene MP4 imports now retain stereo audio. The isolated receiver decoded silence before and after the take and the generated tone during the take. Re-import older clips to supply their source audio. Ads remain silent.
+
+The independent contribution now has a decoded still-image preview distinct from Program. A synthetic MPEG-TS sender and a separate FFmpeg receiver verified red input preview over blue on-air slate, then red Program only after Take, stale preview clearing on loss, and manual retake after reconnect.
+
+Private-interface contribution passed the same-host physical-interface fixture. The separate receiver stayed on loopback and verified Preview, Take, loss and manual return. Cross-device firewall and routing remain unverified.
+
+The independent contribution supports a server-configured direct MPEG-TS URL, with URL credentials excluded from Program status, redirects disabled and manual retake after recovery. Local HTTP was verified on a separate receiver. Live HTTPS deployment remains unverified.
+
+Optional Program recording writes the composited session to a host-local MPEG-TS file. The receiver fixture matched sequences of decoded audio and video frame hashes from the live UDP capture and the local recording. A missing directory reported recording failure while Program remained running.
+
+An optional SRT caller destination now carries Program alongside local UDP. Separate receivers decoded audio and video, then UDP advanced during SRT loss and a replacement SRT receiver decoded the same session. Remote and encrypted destination interoperability remain unverified.
+
+SRT now accepts a server-side passphrase and reports encryption configuration without exposing the secret. Separate receivers confirmed that an incorrect passphrase yielded no decoded audio or video, UDP continued, and a receiver with the correct passphrase decoded the same Program session before and after disconnect.
+
+Added opt-in sustained black detection for network contribution. Local receiver verification covered black while connected, blocked Take during black, manual recovery, and ordinary transport loss and reconnect. Disable with MCR_PROGRAM_BLACK_SECONDS=0. See the staging runbook for behavior and settings.
+
+Added opt-in frozen-picture detection on the network contribution. The receiver fixture verified fallback while the sender remained connected and manual retake once picture motion recovered. Roll back operationally with MCR_PROGRAM_FREEZE_SECONDS=0. See the staging runbook.
+
+Added opt-in silence detection for decoded contribution audio at −60 dBFS RMS. The loopback receiver fixture confirmed fallback while the sender remained connected, blocked Take during silence, and a manual retake after healthy audio returned. Roll back operationally with MCR_PROGRAM_SILENCE_SECONDS=0.
+
+The independent contribution reports input RMS in dBFS before Take. The loopback receiver fixture verified tone, silence, recovery and clearing on disconnect. The meter also runs when silence fallback is disabled.
+
+Added a separate pre-encode Program RMS meter. The loopback fixture verified silent Program with incoming tone, tone after Take and silence after fallback.
+
+Added session-scoped Program mute/unmute before encoding with station-control authorization. A separate UDP decoder verified silence and restored audio without a Program session change. FFmpeg reported non-monotonic audio timestamps around source retake during the same run. The receiver assertions, both builds and all 27 repository tests passed.
+
+Program now timestamps all PCM from a single sample counter. A bounded contribution queue supplies that clock, with silence on underrun. Receiver checks passed source loss, retake, mute and unmute without the previous backwards audio timestamp warnings. Local scene and recording checks also passed. Long-run A/V drift remains unmeasured.
+
+Added an audited Program attenuation control from −30 to 0 dB. Local receiver PCM verified a −12 dB change and restoration within the same session.
+
+Added a station-scoped composed Program monitor. The local scene fixture verified image, watermark and ad in the monitor and in the independent UDP receiver. The monitor cleared on stop.
+
+Live Control now displays separate input and Program monitors together. The isolated Chrome fixture verified wide and narrow layout and removal on stop. Reverting the IndependentProgram layout restores the previous collapsible input view.
+
+Added named local scene storage and selection while retaining the original scene API. The receiver decoded different overlays from two saved scenes in one session with OBS closed. The original scene remains accessible if the named-scene UI is rolled back.
+
+Named scenes can now reference the existing station network input. The separate receiver decoded the saved network take with graphics and then slate on input loss. UDP was used in this fixture. To remove this workflow revert the named network scene route and editor additions together.
+
+Local scene editor can request a still frame from the broadcast worker. The separate UDP receiver fixture verified isolation and subsequent Take. The route and button can be reverted together while retaining browser preview.
+
+Added optional fade from black on saved scene Take. The UDP fixture verified intermediate grayscale frames followed by the white network scene while the global logo and ad remained visible.
+
+Added concurrent primary and secondary ingest with independent status and preview. Local UDP fixtures verified selecting both saved network scenes and that loss on the off-air input leaves Program on the other input. Unset MCR_PROGRAM_SECOND_INPUT_PORT to return to one input.
+
+Added opt-in primary-to-secondary automatic failover. The UDP fixture decoded primary, then healthy backup and finally slate with the same session. Unset MCR_PROGRAM_AUTO_BACKUP to revert the policy.
+
+Optional loopback Program service lets the web process restart while the worker stays up. A staging receiver continued decoding video and PCM during the outage. The recovered UI API returned the same session and accepted mute and stop. Removing the opt-in restores single-process mode.
+
+Opt-in runtime boot starts Program on slate using persisted graphic and ad revisions. The separate receiver decoded the new session after restarting the runtime without a Start request. Unset MCR_PROGRAM_AUTOSTART to revert.
+
+Added opt-in recovery of the last successful operator source selection on Program runtime boot. A new session starts on slate and network recovery waits for readiness within a bounded window. Unset MCR_PROGRAM_RESTORE_SOURCE to revert.
+
+Verified local-scene restart with independently decoded video and audio, then removed the first video frame in fixture SQLite and verified safe slate. Live Control displays unavailable or waiting during recovery. The status UI can be reverted independently.

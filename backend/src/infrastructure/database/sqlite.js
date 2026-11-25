@@ -15,6 +15,7 @@ export function getSqliteDatabase() {
   }
 
   dbInstance = new DatabaseSync(dbPath);
+  dbInstance.exec('PRAGMA busy_timeout = 3000');
 
   // Initialize SQLite tables matching the domain schema
   dbInstance.exec(`
@@ -104,7 +105,22 @@ export function getSqliteDatabase() {
       PRIMARY KEY (stationId, kind)
     );
 
+    CREATE TABLE IF NOT EXISTS program_resume_source (
+      stationId TEXT PRIMARY KEY REFERENCES stations(id) ON DELETE CASCADE, selection TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS program_named_scenes (
+      stationId TEXT NOT NULL REFERENCES stations(id) ON DELETE CASCADE,
+      id TEXT NOT NULL, scene TEXT NOT NULL, PRIMARY KEY (stationId,id)
+    );
+    CREATE TABLE IF NOT EXISTS program_local_scenes (
+      stationId TEXT PRIMARY KEY REFERENCES stations(id) ON DELETE CASCADE, scene TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS program_ads (stationId TEXT PRIMARY KEY, plan TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS ad_asset_audio (
+      stationId TEXT NOT NULL, asset TEXT NOT NULL, pcm BLOB NOT NULL,
+      PRIMARY KEY (stationId, asset),
+      FOREIGN KEY (stationId, asset) REFERENCES ad_assets(stationId,id) ON DELETE CASCADE
+    );
     CREATE TABLE IF NOT EXISTS ad_assets (
       stationId TEXT NOT NULL, id TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
       frames INTEGER NOT NULL, media BLOB NOT NULL, PRIMARY KEY(stationId,id)

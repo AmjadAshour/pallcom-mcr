@@ -1,7 +1,16 @@
-import { configured, programAction, programStatus } from '../../infrastructure/program/supervisor.js';
-import { storedWatermark } from '../../infrastructure/program/watermark.js';
-import { createAdRenderer } from '../../infrastructure/program/ads.js';
+import { configured, inputPreviewFrame, programAction, programMonitorFrame, programStatus,
+  setSourceRecovery, startConfiguredProgram } from '../../infrastructure/program/supervisor.js';
 import { RepositoryFactory } from '../../infrastructure/repositories/repository-factory.js';
+import { rememberProgramSource } from '../../infrastructure/program/resume-source.js';
+
+export async function independentMonitor(req, res, next) {
+  try {
+    const station = await RepositoryFactory.getStationRepository().findById(req.params.id, req.user.organizationId);
+    if (!station || !configured(station.id)) return res.sendStatus(404);
+    const data = req.path.endsWith('/program-monitor') ? programMonitorFrame() : inputPreviewFrame(req.query.input);
+    res.set('Cache-Control', 'private, no-store').json({ success:true, data });
+  } catch (error) { next(error); }
+}
 
 export async function independentProgram(req, res, next) {
   try {
@@ -10,13 +19,17 @@ export async function independentProgram(req, res, next) {
     if (!station) return res.sendStatus(404);
     if (req.method === 'GET') return res.json({ success: true, data: programStatus(id) });
     if (!configured(id)) return res.status(409).json({ success: false, error: 'Independent Program is not configured' });
-    const { action } = req.body;
+    const { action, gainDb } = req.body;
     await RepositoryFactory.getAuditRepository().create({
       organizationId: req.user.organizationId, userId: req.user.id, action: 'PROGRAM_REQUEST',
-      resourceType: 'Station', resourceId: id, details: { action }
+      resourceType: 'Station', resourceId: id, details: req.body
     });
-    const data = await programAction(id, action, action === 'start' ? storedWatermark(id) : undefined,
-      action === 'start' ? createAdRenderer(id) : undefined);
+    const data = action === 'start' ? await startConfiguredProgram(id)
+      : await programAction(id, action, undefined, undefined, gainDb);
+    if (action === 'obs' || action === 'fallback' || action === 'stop') {
+      rememberProgramSource(id, {source:action === 'obs' ? 'obs' : 'fallback'});
+      setSourceRecovery(data.session, 'cancelled');
+    }
     res.json({ success: true, data });
   } catch (error) { next(error); }
 }

@@ -9,7 +9,7 @@ import { getSqliteDatabase } from '../../infrastructure/database/sqlite.js';
 import { insertAuditEvent } from '../../infrastructure/repositories/sqlite-audit-repository.js';
 import { adPlan, applyPlacements, runtimeNow } from '../../infrastructure/program/ads.js';
 import { prepareCreative } from '../../infrastructure/program/ad-creatives.js';
-import { configured, updateAds } from '../../infrastructure/program/supervisor.js';
+import { configured, updateAds, usesLocalSceneAsset } from '../../infrastructure/program/supervisor.js';
 
 export const adsRouter = Router();
 const root = '/stations/:id/program/ads';
@@ -151,6 +151,7 @@ adsRouter.post(
           .run(id, asset, name.data, prepared.kind, prepared.frames.length, prepared.media);
         const insert = db().prepare('INSERT INTO ad_frames VALUES (?,?,?,?)');
         prepared.frames.forEach((frame, index) => insert.run(id, asset, index, frame));
+        if (prepared.pcm?.length) db().prepare('INSERT INTO ad_asset_audio VALUES (?,?,?)').run(id, asset, prepared.pcm);
         audit(req, 'AD_ASSET_ADD', { asset });
       });
       res
@@ -172,6 +173,15 @@ adsRouter.delete(root + '/assets/:asset', (req, res) => {
   transaction(() => {
     if (adPlan(id).placements.some((p) => p.items.some((i) => i.asset === asset)))
       fail('Creative is assigned to Program', 409);
+    const saved = db().prepare('SELECT scene FROM program_local_scenes WHERE stationId=?').get(id);
+    const scene = saved && JSON.parse(saved.scene);
+    const namedScenes = db().prepare('SELECT scene FROM program_named_scenes WHERE stationId=?').all(id);
+    const usedByNamedScene = namedScenes.some(row => {
+      const entry = JSON.parse(row.scene);
+      return entry.video === asset || entry.image === asset;
+    });
+    if (usesLocalSceneAsset(asset) || scene?.video === asset || scene?.image === asset || usedByNamedScene)
+      fail('Creative is assigned to the local scene', 409);
     if (!db().prepare('DELETE FROM ad_assets WHERE stationId=? AND id=?').run(id, asset).changes)
       fail('Creative unavailable', 404);
     db().prepare('DELETE FROM ad_frames WHERE stationId=? AND asset=?').run(id, asset);

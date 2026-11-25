@@ -165,6 +165,11 @@ export class StationController {
       const { id } = req.params;
       const stationRepo = RepositoryFactory.getStationRepository();
       const auditRepo = RepositoryFactory.getAuditRepository();
+      if (process.env.MCR_PROGRAM_RUNTIME_PORT && configured(id)) {
+        const station = await stationRepo.findById(id, req.user.organizationId);
+        if (!station) return res.status(404).json({ success:false, error:'Station not found' });
+        return res.status(409).json({ success:false, error:'Unconfigure this station from the separate Program runtime before deleting it' });
+      }
 
       const deleted = await stationRepo.delete(id, req.user.organizationId);
       if (!deleted) {
