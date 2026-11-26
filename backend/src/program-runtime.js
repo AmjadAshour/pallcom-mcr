@@ -5,6 +5,7 @@ import { apiRouter } from './presentation/routes/index.js';
 import { adsRouter } from './presentation/routes/ads.js';
 import { scenesRouter } from './presentation/routes/scenes.js';
 import { watermarkRouter } from './presentation/routes/watermark.js';
+import { tickerRouter } from './presentation/routes/ticker.js';
 import { errorHandler } from './presentation/middlewares/error.middleware.js';
 import { programPath, programRuntimePort } from './infrastructure/program/runtime-proxy.js';
 import { getSqliteDatabase } from './infrastructure/database/sqlite.js';
@@ -27,7 +28,7 @@ app.use((req, res, next) => {
 app.use('/api/v1/stations/:id/program/watermark', express.json({ limit:'800kb' }));
 app.use(express.json({ limit:'100kb' }));
 app.use(cookieParser());
-app.use('/api/v1', apiRouter, watermarkRouter, adsRouter, scenesRouter);
+app.use('/api/v1', apiRouter, watermarkRouter, adsRouter, scenesRouter, tickerRouter);
 app.use(errorHandler);
 app.listen(port, '127.0.0.1', async () => {
   console.log('Program runtime listening on loopback');

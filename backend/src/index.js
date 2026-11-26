@@ -11,6 +11,7 @@ import { env } from './config/env.js';
 import { apiRouter } from './presentation/routes/index.js';
 import { graphicsRouter } from './presentation/routes/graphics.js';
 import { watermarkRouter } from './presentation/routes/watermark.js';
+import { tickerRouter } from './presentation/routes/ticker.js';
 import { adsRouter } from './presentation/routes/ads.js';
 import { scenesRouter } from './presentation/routes/scenes.js';
 import { playoutRouter } from './presentation/routes/playout.js';
@@ -83,6 +84,7 @@ app.get('/health', (req, res) => {
 app.use('/api/v1', apiRouter);
 app.use('/api/v1', graphicsRouter);
 app.use('/api/v1', watermarkRouter);
+app.use('/api/v1', tickerRouter);
 app.use('/api/v1', adsRouter);
 app.use('/api/v1', scenesRouter);
 app.use('/api/v1', playoutRouter);
