@@ -9,12 +9,16 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import sharp from 'sharp';
 
 const dbDir = mkdtempSync(join(tmpdir(),'mcr-control-restart-'));
+const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
 const secret = () => randomBytes(32).toString('hex');
+const secondaryFixture = process.env.MCR_TEST_SECONDARY === '1';
+const networkAction = secondaryFixture ? 'obs2' : 'obs';
+const networkPort = secondaryFixture ? '25604' : '25603';
 Object.assign(process.env, {
   NODE_ENV:'test', STORAGE_MODE:'sqlite', SQLITE_DB_PATH:join(dbDir,'fixture.sqlite'),
   MCR_BIND_HOST:'127.0.0.1', PORT:'25600', MCR_PROGRAM_RUNTIME_PORT:'25601',
   MCR_PROGRAM_OUTPUT_PORT:'25602', MCR_PROGRAM_INPUT_PORT:'25603', MCR_PROGRAM_SLATE:'blue',
-  MCR_PROGRAM_SECOND_INPUT_PORT:'', MCR_PROGRAM_AUTO_BACKUP:'0', MCR_PROGRAM_INPUT_URL:'',
+  MCR_PROGRAM_SECOND_INPUT_PORT:secondaryFixture ? networkPort : '', MCR_PROGRAM_AUTO_BACKUP:'0', MCR_PROGRAM_INPUT_URL:'',
   MCR_PROGRAM_SRT_URL:'', MCR_PROGRAM_SRT_PASSPHRASE:'', MCR_PROGRAM_RECORDING_DIR:'',
   MCR_PROGRAM_AUTOSTART:'0',
   MCR_PROGRAM_RESTORE_SOURCE:'0',
@@ -60,11 +64,11 @@ let runtime, web, receiver, sender;
 let videoBytes=0, audioBytes=0;
 let redFrames=0;
 let yellowFrames=0, blueFrames=0, audibleChunks=0;
-const contribution = () => spawn('ffmpeg',['-nostdin','-loglevel','error','-re','-f','lavfi','-i',
+const contribution = () => spawn(ffmpeg,['-nostdin','-loglevel','error','-re','-f','lavfi','-i',
   'color=red:s=320x180:r=25','-f','lavfi','-i','sine=frequency=880','-c:v','libx264','-tune','zerolatency',
-  '-g','25','-c:a','aac','-f','mpegts','udp://127.0.0.1:25603?pkt_size=1316'],{stdio:'ignore',windowsHide:true});
+  '-g','25','-c:a','aac','-f','mpegts','udp://127.0.0.1:' + networkPort + '?pkt_size=1316'],{stdio:'ignore',windowsHide:true});
 function startReceiver() {
-  const decoder = spawn('ffmpeg',['-nostdin','-loglevel','error','-i','udp://127.0.0.1:25602','-map','0:v',
+  const decoder = spawn(ffmpeg,['-nostdin','-loglevel','error','-i','udp://127.0.0.1:25602','-map','0:v',
     '-vf','scale=1:1','-pix_fmt','rgb24','-f','rawvideo','pipe:1','-map','0:a','-f','s16le','pipe:3'],
     {stdio:['ignore','pipe','inherit','pipe'],windowsHide:true});
   let carry = Buffer.alloc(0);
@@ -132,8 +136,8 @@ try {
   assert.equal(restarted.source,'fallback');
   console.log('Program runtime auto-start receiver passed');
   sender=contribution();
-  await waitFor(async()=> (await call()).obs==='ready');
-  await call('obs');
+  await waitFor(async()=> (await call())[networkAction]==='ready');
+  assert.equal((await call(networkAction)).source, networkAction);
   await waitFor(()=>redFrames>10);
   await stop(runtime);
   await stop(sender);
@@ -149,7 +153,7 @@ try {
   assert.equal((await call()).source,'fallback');
   assert.equal(redFrames,0);
   sender=contribution();
-  await waitFor(async()=>redFrames>10 && (await call()).source==='obs');
+  await waitFor(async()=>redFrames>10 && (await call()).source===networkAction);
   assert.notEqual((await call()).session,restarted.session);
   console.log('Saved source restored on receiver');
   async function sceneRequest(suffix, method, body, type='application/json') {
@@ -160,7 +164,7 @@ try {
     return payload.data;
   }
   const clip=join(dbDir,'restore-fixture.mp4');
-  execFileSync('ffmpeg',['-nostdin','-loglevel','error','-f','lavfi','-i','color=yellow:s=320x180:r=25',
+  execFileSync(ffmpeg,['-nostdin','-loglevel','error','-f','lavfi','-i','color=yellow:s=320x180:r=25',
     '-f','lavfi','-i','sine=frequency=440','-t','2','-c:v','libx264','-c:a','aac',clip],{windowsHide:true});
   const image=await sharp({create:{width:32,height:32,channels:3,background:'#00ff00'}}).png().toBuffer();
   const video=await sceneRequest('/ads/assets?name=restore-video','POST',readFileSync(clip),'video/mp4');
