@@ -1,27 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { api, stationPath } from '../context/api.js';
+import { pollWhileVisible } from '../context/pollWhileVisible.js';
 
 export function ProgramPreview({ station, preview = false }) {
   const [frame, setFrame] = useState(null);
 
   useEffect(() => {
     if (station.status !== 'ONLINE' || !station.ready || (preview && !station.studioModeEnabled)) return;
-    const controller = new AbortController();
-    let timer;
-
-    async function refresh() {
+    return pollWhileVisible(async (signal) => {
       try {
-        const { data } = await api(stationPath(station.id, preview ? '/preview-image?bus=preview' : '/preview-image'), { signal: controller.signal });
-        if (!controller.signal.aborted) setFrame(data.imageData);
-      } catch {
-        if (!controller.signal.aborted) setFrame(null);
-      } finally {
-        if (!controller.signal.aborted) timer = setTimeout(refresh, 3000);
+        const { data } = await api(stationPath(station.id, preview ? '/preview-image?bus=preview' : '/preview-image'), { signal });
+        if (!signal.aborted) setFrame(data.imageData);
+      } catch (error) {
+        if (!signal.aborted && error.status !== 429) setFrame(null);
+        throw error;
       }
-    }
-
-    void refresh();
-    return () => { controller.abort(); clearTimeout(timer); };
+    }, 3000);
   }, [station.id, station.status, station.ready, station.studioModeEnabled, preview]);
 
   return station.ready && (!preview || station.studioModeEnabled) && frame

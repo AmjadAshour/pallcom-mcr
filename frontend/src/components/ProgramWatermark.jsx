@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { watermarkBounds } from '@mcr/shared';
 import { api, stationPath } from '../context/api.js';
+import { useMonitorFrame } from '../context/useProgramMonitor.js';
 
 const en = { title: 'Program watermark', preview: 'Watermark Preview', enabled: 'Enable watermark',
   choose: 'Use station logo', upload: 'Upload logo', anchor: 'Anchor', x: 'Horizontal inset (%)', y: 'Vertical inset (%)',
@@ -23,10 +24,10 @@ export function ProgramWatermark({ stationId, language, status }) {
   const [record, setRecord] = useState(null);
   const [draft, setDraft] = useState(null);
   const [reload, setReload] = useState(0);
-  const [frame, setFrame] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const running = status.state === 'running';
+  const frame = useMonitorFrame(path + '/preview', opened && running, 3000);
 
   useEffect(() => {
     if (!opened) return;
@@ -37,20 +38,6 @@ export function ProgramWatermark({ stationId, language, status }) {
     return () => abort.abort();
   }, [path, reload, opened]);
 
-  useEffect(() => {
-    if (!opened || !running) { setFrame(null); return; }
-    const abort = new AbortController();
-    let timer;
-    async function refresh() {
-      try {
-        const { data } = await api(path + '/preview', { signal: abort.signal });
-        if (!abort.signal.aborted) setFrame(data);
-      } catch { if (!abort.signal.aborted) setFrame(null); }
-      finally { if (!abort.signal.aborted) timer = setTimeout(refresh, 1000); }
-    }
-    void refresh();
-    return () => { abort.abort(); clearTimeout(timer); };
-  }, [path, opened, running]);
 
   const change = (key, value) => setDraft(old => ({ ...old, [key]: value }));
   const dirty = record && JSON.stringify(record.settings) !== JSON.stringify(draft);

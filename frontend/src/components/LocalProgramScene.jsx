@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { PROGRAM_SCENE_UPLOAD } from '@mcr/shared';
 import { api, stationPath } from '../context/api.js';
+import { programVideoUrl, uploadProgramVideo } from '../context/programVideo.js';
 
 const style = 'rounded border border-zinc-600 bg-zinc-950 px-3 py-1.5 disabled:opacity-50';
 const defaults = { video: '', image: '', x: 5, y: 5, w: 20, h: 20 };
@@ -16,7 +18,7 @@ export function LocalProgramScene({ stationId, language, running, inputFrame, in
   const [message, setMessage] = useState('');
   const [workerPreview, setWorkerPreview] = useState(null);
   const [transition, setTransition] = useState('cut');
-  const media = id => '/api/v1' + root + '/ads/assets/' + id + '/media';
+  const media = id => programVideoUrl(root, id);
   const change = (key, value) => {
     setWorkerPreview(null);
     setDraft(old => ({ ...old, [key]: value }));
@@ -24,7 +26,7 @@ export function LocalProgramScene({ stationId, language, running, inputFrame, in
   const network = draft.type === 'network';
   const networkFrame = draft.input === 'secondary' ? secondInputFrame : inputFrame;
   const networkReady = draft.input === 'secondary' ? secondInputReady : inputReady;
-  const canSave = (!draft.id || draft.name?.trim()) && (network || (draft.video && draft.image));
+  const canSave = (!draft.id || draft.name?.trim()) && (network || Boolean(draft.video));
   async function run(work) {
     setBusy(true);
     setMessage('');
@@ -46,10 +48,32 @@ export function LocalProgramScene({ stationId, language, running, inputFrame, in
       ? previous.map(scene => scene.id === draft.id ? draft : scene)
       : [...previous, draft]);
   }
+  async function uploadVideo(file) {
+    await run(async () => {
+      setMessage(label('Uploading and preparing video…', 'جارٍ رفع الفيديو وتجهيزه…'));
+      const data = await uploadProgramVideo(root, file, language);
+      setAssets(previous => [...previous, data]);
+      setDraft({ ...defaults, id: crypto.randomUUID(), video: data.id,
+        name: file.name.replace(/\.mp4$/i, '').trim().slice(0, 80) || label('Video scene', 'مشهد فيديو') });
+      setWorkerPreview(null);
+      setMessage(label('Video ready. Select Take scene to put it on Program.', 'الفيديو جاهز. اضغط أخذ المشهد لعرضه على البث.'));
+    });
+  }
   return <details onToggle={event => { if (event.currentTarget.open && !loaded) void run(load); }}>
     <summary className="cursor-pointer py-2 font-semibold">{label('Program scenes', 'مشاهد Program')}</summary>
-    <p className="text-sm text-zinc-300">{label('Choose imported creatives from the ad library. New imports retain their audio for Program. Preview is muted.', 'اختر ملفات مستوردة من مكتبة الإعلانات. يحتفظ الاستيراد الجديد بصوت الفيديو للبث. المعاينة صامتة.')}</p>
     <fieldset disabled={busy || !loaded} className="my-2 space-y-2">
+      <label className="grid gap-1 rounded border border-zinc-700 px-3 py-2 text-sm">
+        <span className="font-semibold">{label('Upload video to Program', 'رفع فيديو للبث')}</span>
+        <input type="file" accept="video/mp4,.mp4" onChange={event => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = '';
+          if (file) void uploadVideo(file);
+        }} />
+        <span className="text-xs text-zinc-400">{label(
+          `MP4 up to ${PROGRAM_SCENE_UPLOAD.maxMib} MiB and ${PROGRAM_SCENE_UPLOAD.maxSeconds} seconds. Preview is muted.`,
+          `ملف MP4 حتى ${PROGRAM_SCENE_UPLOAD.maxMib} ميبيبايت و${PROGRAM_SCENE_UPLOAD.maxSeconds} ثانية. المعاينة صامتة.`
+        )}</span>
+      </label>
       <div className="flex flex-wrap items-end gap-2">
         <label className="grid gap-1 text-sm">{label('Saved scenes', 'المشاهد المحفوظة')}
           <select className={style} value={scenes.some(scene => scene.id === draft.id) ? draft.id ?? 'legacy' : ''}
@@ -95,13 +119,13 @@ export function LocalProgramScene({ stationId, language, running, inputFrame, in
       </label>}
       {!network && <div className="grid grid-cols-2 gap-2">
         {['video','image'].map(kind => <label key={kind} className="grid gap-1 text-sm">
-          {kind === 'video' ? label('Background video','فيديو الخلفية') : label('Overlay image','الصورة فوق الفيديو')}
-          <select className={style} value={draft[kind]} onChange={e => change(kind,e.target.value)}>
-            <option value="">{label('Select file','اختر ملفًا')}</option>
+          {kind === 'video' ? label('Background video','فيديو الخلفية') : label('Overlay image (optional)','صورة فوق الفيديو (اختيارية)')}
+          <select className={style} value={draft[kind] ?? ''} onChange={e => change(kind,e.target.value)}>
+            <option value="">{kind === 'image' ? label('No overlay','بدون صورة') : label('Select file','اختر ملفًا')}</option>
             {assets.filter(a => a.kind === kind).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
         </label>)}
-        {Object.entries({x:label('Left %','من اليسار %'),y:label('Top %','من الأعلى %'),w:label('Width %','العرض %'),h:label('Height %','الارتفاع %')}).map(([key,title]) =>
+        {draft.image && Object.entries({x:label('Left %','من اليسار %'),y:label('Top %','من الأعلى %'),w:label('Width %','العرض %'),h:label('Height %','الارتفاع %')}).map(([key,title]) =>
           <label key={key} className="grid gap-1 text-sm">{title}<input type="number" className={style}
             min={key === 'w' || key === 'h' ? 5 : 0} max={key === 'w' || key === 'h' ? 100 : 95}
             value={draft[key]} onChange={e => change(key,e.target.value === '' ? '' : Number(e.target.value))}/></label>)}

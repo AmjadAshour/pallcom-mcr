@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { adLayer, placementOrder } from '@mcr/shared';
 import { api, stationPath } from '../context/api.js';
+import { useMonitorFrame } from '../context/useProgramMonitor.js';
 
 const button = 'rounded border border-zinc-600 px-3 py-1.5 text-sm disabled:opacity-50';
 const input = 'w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm';
@@ -103,8 +104,9 @@ export function ProgramAds({ stationId, language, status }) {
   const [zone, setZone] = useState('UTC'),
     [selected, setSelected] = useState(''),
     [creative, setCreative] = useState('');
-  const [origin, setOrigin] = useState(performance.now()),
-    [background, setBackground] = useState(null);
+  const [origin, setOrigin] = useState(performance.now());
+  const background = useMonitorFrame(stationPath(stationId, '/program/watermark/preview'),
+    opened && status.state === 'running', 3000);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const p = placements.find((p) => p.id === selected);
@@ -134,31 +136,6 @@ export function ProgramAds({ stationId, language, status }) {
     setCreative(data.assets[0]?.id ?? '');
     setLoaded(true);
   }
-  useEffect(() => {
-    if (!opened || status.state !== 'running') {
-      setBackground(null);
-      return;
-    }
-    const abort = new AbortController();
-    let timer;
-    async function refresh() {
-      try {
-        const { data } = await api(stationPath(stationId, '/program/watermark/preview'), {
-          signal: abort.signal
-        });
-        if (!abort.signal.aborted) setBackground(data);
-      } catch {
-        if (!abort.signal.aborted) setBackground(null);
-      } finally {
-        if (!abort.signal.aborted) timer = setTimeout(refresh, 1500);
-      }
-    }
-    void refresh();
-    return () => {
-      abort.abort();
-      clearTimeout(timer);
-    };
-  }, [opened, status.state, stationId]);
   function edit(fields) {
     setPlacements((old) => old.map((entry) => (entry.id === selected ? { ...entry, ...fields } : entry)));
   }
