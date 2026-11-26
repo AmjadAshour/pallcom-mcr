@@ -1,0 +1,41 @@
+services:
+  server:
+    build:
+      target: iptv
+      args:
+        NODE_IMAGE: node:22-bookworm-slim
+    environment:
+      MCR_PROGRAM_STATION_ID: ${MCR_PROGRAM_STATION_ID:-}
+      MCR_PROGRAM_PYTHON: /usr/bin/python3
+      MCR_PROGRAM_OUTPUT_PORT: "5102"
+      MCR_PROGRAM_INPUT_URL: ${MCR_PROGRAM_INPUT_URL:-}
+      MCR_PROGRAM_SRT_URL: ${MCR_PROGRAM_SRT_URL:-}
+      MCR_PROGRAM_SRT_PASSPHRASE: ${MCR_PROGRAM_SRT_PASSPHRASE:-}
+
+  hls:
+    build:
+      context: ../../..
+      dockerfile: backend/infrastructure/docker/Dockerfile.hls
+    init: true
+    restart: unless-stopped
+    network_mode: "service:server"
+    depends_on:
+      server:
+        condition: service_started
+        restart: true
+    cap_drop: [ALL]
+    read_only: true
+    volumes:
+      - mcr_hls:/srv/hls
+
+  web:
+    depends_on:
+      server:
+        condition: service_started
+        restart: true
+    volumes:
+      - mcr_hls:/srv/hls:ro
+      - ./iptv.nginx.conf:/etc/nginx/mcr-locations/iptv.conf:ro
+
+volumes:
+  mcr_hls:

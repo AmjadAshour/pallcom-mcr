@@ -1,0 +1,7 @@
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && install -d -o 10001 -g 10001 /srv/hls/iptv
+COPY backend/infrastructure/docker/publish-hls.sh /usr/local/bin/publish-hls
+USER 10001:10001
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/publish-hls"]

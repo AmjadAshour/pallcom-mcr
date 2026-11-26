@@ -1,4 +1,5 @@
-FROM node:22-alpine AS builder
+ARG NODE_IMAGE=node:22-alpine
+FROM ${NODE_IMAGE} AS server
 
 WORKDIR /app
 
@@ -19,3 +20,17 @@ COPY backend ./backend
 
 EXPOSE 4000
 CMD ["node", "backend/src/index.js"]
+
+FROM server AS iptv
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-gi gir1.2-gstreamer-1.0 gir1.2-gdkpixbuf-2.0 \
+    gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
+    ffmpeg fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/* \
+    && /usr/bin/python3 -c 'import gi; gi.require_version("Gst", "1.0"); gi.require_version("GdkPixbuf", "2.0"); from gi.repository import Gst, GdkPixbuf; Gst.init(None)' \
+    && for element in x264enc avenc_aac intervideosrc gdkpixbufoverlay mpegtsmux tsdemux srtsink souphttpsrc; do \
+        gst-inspect-1.0 "$element" >/dev/null || exit 1; \
+    done
+
+FROM server AS default
