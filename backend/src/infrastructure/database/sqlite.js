@@ -132,6 +132,10 @@ export function getSqliteDatabase() {
     CREATE TABLE IF NOT EXISTS program_watermarks (
       stationId TEXT PRIMARY KEY, revision INTEGER NOT NULL, settings TEXT NOT NULL, bitmap TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS program_tickers (
+      stationId TEXT PRIMARY KEY REFERENCES stations(id) ON DELETE CASCADE,
+      revision INTEGER NOT NULL, settings TEXT NOT NULL, bitmap TEXT NOT NULL
+    );
 
     CREATE TABLE IF NOT EXISTS station_playout (
       stationId TEXT PRIMARY KEY, plan TEXT NOT NULL, state TEXT NOT NULL,
