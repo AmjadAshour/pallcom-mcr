@@ -103,3 +103,31 @@ Opt-in runtime boot starts Program on slate using persisted graphic and ad revis
 Added opt-in recovery of the last successful operator source selection on Program runtime boot. A new session starts on slate and network recovery waits for readiness within a bounded window. Unset MCR_PROGRAM_RESTORE_SOURCE to revert.
 
 Verified local-scene restart with independently decoded video and audio, then removed the first video frame in fixture SQLite and verified safe slate. Live Control displays unavailable or waiting during recovery. The status UI can be reverted independently.
+
+## IPTV deployment preparation
+
+Added an opt-in Linux Compose configuration with the GStreamer Program runtime, a separate FFmpeg HLS packager and an HTTPS Nginx location for one public channel. The packager shares the Program network namespace for local UDP and passes through H.264 and AAC. The existing SQLite volume retains application data.
+
+Both application builds and 27 repository tests passed with isolated SQLite. Shell syntax and static YAML wiring passed. Docker Compose rendering, image builds and independent HLS playback remain pending on a Linux Docker host. No deployment was performed. Roll back by stopping the HLS service and returning to base Compose with the same project and SQLite volume. See the [IPTV deployment guide](IPTV_DEPLOYMENT.md).
+
+Fixed contribution readiness when silence detection is disabled. Before the change, stereo silence blocked Take even at a zero timeout. After the change a loopback sender with video and silent AAC reached ready, and an independent HLS receiver decoded moving frames after Take. FFmpeg reported a video timestamp warning at the switch. Reverting the worker guard restores the previous behavior.
+
+Multiview now displays the Independent Program status and picture for an active worker, even when the OBS Agent is offline. Program displays the composed output and Preview displays the primary input. Both use existing station-scoped reads. The local browser verified both views on the test station and retained OBS status on unconfigured stations. Revert the Multiview change and restore the frame hook to Live Control to roll back.
+
+Reduced dashboard polling during live operation. Hidden tabs pause Program and OBS preview reads and station synchronization. These reads honor HTTP 429 retry timing and retain the last result during throttling. The session check retries a 429 without opening the sign-in form. Local verification covered the Program monitor with the advertising panel open and the hidden-tab and retry regression test. The API limits are unchanged. Roll back the frontend polling and session changes together.
+
+Moved Independent Program ads, watermark and ticker to Graphics & Overlays, saved scenes to Sources & Scenes, and mute and gain to Audio Mixer. Live Control retains monitors, source switching and session controls. The news ticker stores a revision per station and scrolls Arabic or Latin text over the encoded output, with adjustable speed and direction. Applying or hiding the strip does not restart Program.
+
+Both builds and 28 repository tests passed. The isolated ticker loopback verified access checks, stale revision rejection, text motion and removal on decoded video within one session. The local browser verified the relocated controls on station test. Roll back the page moves together and disable the ticker before reverting its route, controller and worker changes. The additive SQLite table can remain in place.
+
+Sources & Scenes now streams MP4 uploads up to 128 MiB and 60 seconds, prepares the video for Program, and selects the result in a new draft. The overlay image is optional. The existing ad upload route retains its original limits and shares the station media library. Uploads do not change the on-air source before Take.
+
+Both builds and 28 repository tests passed. An isolated SQLite runtime accepted the supplied 93,904,507-byte MP4, saved and previewed a video-only scene, and an independent FFmpeg receiver decoded the moving Program output. The browser displayed the upload and optional overlay controls on station test. Revert the source upload route, scene settings and UI changes together. Before reverting support for video-only scenes, add an overlay to any such saved scene that must remain usable on the earlier version.
+
+Live Control now places a Take button beside each configured input and marks the active input On air. A direct secondary Take is station-authorized, audited and restored after runtime restart. The isolated control-restart receiver passed with MCR_TEST_SECONDARY=1. The local browser took OBS on the secondary input and verified the running Program status.
+
+The HLS packager now targets one-second segments. Local playback used a two-segment live target and measured two seconds behind the newest published segment while playing 720p. Capture-to-screen latency was not measured. Roll back the selection UI and API together. Restore the previous HLS segment duration and player target if clients need the prior buffer.
+
+Added a Video input tile to Live Control. Operators can select or upload a station video, preview it muted and take it directly to Program with its source audio. It uses the existing local scene worker and saved source recovery without creating a named scene. The selected asset shows On air when it matches the current Program video.
+
+Both builds and 28 repository tests passed. The isolated upload loopback checked authentication, a missing asset, direct Take in the same Program session and independently decoded video. The local browser selected another clip for preview while the current Program continued. To roll back, revert the Video input tile and direct Take route. Existing uploads remain in the station library.
