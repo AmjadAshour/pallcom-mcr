@@ -1,5 +1,4 @@
 import { Router, raw } from 'express';
-import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { scheduledInstant, transportAction } from '@mcr/shared';
 import { authenticate } from '../middlewares/auth.middleware.js';
@@ -9,6 +8,7 @@ import { getSqliteDatabase } from '../../infrastructure/database/sqlite.js';
 import { insertAuditEvent } from '../../infrastructure/repositories/sqlite-audit-repository.js';
 import { adPlan, applyPlacements, runtimeNow } from '../../infrastructure/program/ads.js';
 import { prepareCreative } from '../../infrastructure/program/ad-creatives.js';
+import { storeCreative } from '../../infrastructure/program/creative-library.js';
 import { configured, updateAds, usesLocalSceneAsset } from '../../infrastructure/program/supervisor.js';
 
 export const adsRouter = Router();
@@ -144,21 +144,16 @@ adsRouter.post(
         fail('Unreadable image or MP4; video limit is 30 seconds');
       }
       if (!owns(req)) return res.sendStatus(404);
-      const asset = randomUUID();
-      transaction(() => {
-        db()
-          .prepare('INSERT INTO ad_assets VALUES (?,?,?,?,?,?)')
-          .run(id, asset, name.data, prepared.kind, prepared.frames.length, prepared.media);
-        const insert = db().prepare('INSERT INTO ad_frames VALUES (?,?,?,?)');
-        prepared.frames.forEach((frame, index) => insert.run(id, asset, index, frame));
-        if (prepared.pcm?.length) db().prepare('INSERT INTO ad_asset_audio VALUES (?,?,?)').run(id, asset, prepared.pcm);
-        audit(req, 'AD_ASSET_ADD', { asset });
+      const asset = transaction(() => {
+        const asset = storeCreative(db(), id, name.data, prepared);
+        audit(req, 'AD_ASSET_ADD', { asset: asset.id });
+        return asset;
       });
       res
         .status(201)
         .json({
           success: true,
-          data: { id: asset, name: name.data, kind: prepared.kind, frames: prepared.frames.length }
+          data: asset
         });
     } catch (error) {
       next(error);

@@ -68,7 +68,7 @@ apiRouter.get(['/stations/:id/program/input-preview', '/stations/:id/program/pro
   authenticate, authorize('station:read'), independentMonitor);
 apiRouter.post('/stations/:id/program', authenticate, authorize('station:control'),
   validateBody(z.union([
-    z.object({ action: z.enum(['start', 'stop', 'obs', 'fallback', 'mute', 'unmute']) }).strict(),
+    z.object({ action: z.enum(['start', 'stop', 'obs', 'obs2', 'fallback', 'mute', 'unmute']) }).strict(),
     z.object({ action: z.literal('gain'), gainDb: z.number().int().min(-30).max(0) }).strict()
   ])), independentProgram);
 apiRouter.get('/stations/:id/scenes', authenticate, authorize('station:read'), ObsController.getScenes);
