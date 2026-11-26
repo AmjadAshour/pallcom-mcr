@@ -26,8 +26,8 @@ export async function independentProgram(req, res, next) {
     });
     const data = action === 'start' ? await startConfiguredProgram(id)
       : await programAction(id, action, undefined, undefined, gainDb);
-    if (action === 'obs' || action === 'fallback' || action === 'stop') {
-      rememberProgramSource(id, {source:action === 'obs' ? 'obs' : 'fallback'});
+    if (['obs', 'obs2', 'fallback', 'stop'].includes(action)) {
+      rememberProgramSource(id, {source:action === 'stop' ? 'fallback' : action});
       setSourceRecovery(data.session, 'cancelled');
     }
     res.json({ success: true, data });
