@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { createProgramSchedule } from '../../infrastructure/program/schedule.js';
 import { z } from 'zod';
 import { PROGRAM_SCENE_UPLOAD } from '@mcr/shared';
 import { authenticate } from '../middlewares/auth.middleware.js';
@@ -43,6 +44,133 @@ scenesRouter.use(root, authenticate, authorize('station:control'), (req, res, ne
   if (!ownsStation(req)) return res.sendStatus(404);
   res.set('Cache-Control', 'no-store');
   next();
+});
+
+scenesRouter.get(root + '/schedule', (req,res) => {
+  const data = getSqliteDatabase().prepare(`SELECT id,sceneId,dueAt,state,executedAt,error,
+    EXISTS(SELECT 1 FROM program_schedule_daily WHERE jobId=id) AS repeatDaily
+    FROM program_schedule WHERE stationId=? ORDER BY state='pending' DESC,dueAt DESC LIMIT 100`)
+    .all(req.params.id);
+  res.json({success:true,data});
+});
+
+function csvCell(value) {
+  const text = String(value ?? '');
+  const safe = /^\s*[=+@-]|^[\t\r\n]/.test(text) ? "'" + text : text;
+  return '"' + safe.replaceAll('"', '""') + '"';
+}
+
+scenesRouter.get(root + '/schedule.csv', (req,res) => {
+  const rows = getSqliteDatabase().prepare(`SELECT id,sceneId,scene,dueAt,state,executedAt,error,
+    EXISTS(SELECT 1 FROM program_schedule_daily WHERE jobId=id) AS repeatDaily
+    FROM program_schedule WHERE stationId=? ORDER BY dueAt DESC LIMIT 10000`).all(req.params.id);
+  const timestamp = value => value === null ? '' : new Date(value).toISOString();
+  const lines = ['event_id,scene_id,scene_name,scheduled_at_utc,result,processed_at_utc,repeat_daily,detail'];
+  for (const row of rows) {
+    lines.push([row.id,row.sceneId,JSON.parse(row.scene).name,row.dueAt === null ? '' : timestamp(row.dueAt),
+      row.state === 'aired' ? 'take_accepted' : row.state,timestamp(row.executedAt),
+      row.repeatDaily ? 'yes' : 'no',row.error].map(csvCell).join(','));
+  }
+  res.attachment('program-schedule.csv').type('text/csv').send('\uFEFF' + lines.join('\r\n') + '\r\n');
+});
+
+scenesRouter.get(root + '/schedule-hold', (req,res) => {
+  const hold = getSqliteDatabase().prepare('SELECT resumedAt FROM program_schedule_hold WHERE stationId=?').get(req.params.id);
+  res.json({success:true,data:{held:hold?.resumedAt === null}});
+});
+
+scenesRouter.put(root + '/schedule-hold', authorize('schedule:manage'),
+  validateBody(z.object({held:z.boolean()}).strict()), (req,res) => {
+    const db = getSqliteDatabase();
+    const stationId = req.params.id;
+    const { held } = req.body;
+    if (held) {
+      db.prepare('INSERT INTO program_schedule_hold VALUES (?,NULL) ON CONFLICT(stationId) DO UPDATE SET resumedAt=NULL')
+        .run(stationId);
+    } else {
+      db.prepare('UPDATE program_schedule_hold SET resumedAt=? WHERE stationId=? AND resumedAt IS NULL')
+        .run(Date.now(),stationId);
+    }
+    res.json({success:true,data:{held}});
+  });
+
+scenesRouter.post(root + '/schedule', authorize('schedule:manage'), validateBody(z.object({
+  sceneId:z.string().uuid(), dueAt:z.number().int().max(253402214400000), repeatDaily:z.boolean().optional()
+}).strict()), (req,res) => {
+  const db = getSqliteDatabase();
+  const {sceneId,dueAt} = req.body;
+  const stationId = req.params.id;
+  if (dueAt <= Date.now()) return res.status(400).json({success:false,error:'Choose a future time'});
+  const saved = readScene(db,stationId,sceneId);
+  if (!saved) return res.sendStatus(404);
+  const id = createProgramSchedule(db, {stationId,userId:req.user.id,sceneId,scene:saved.scene,dueAt,
+    repeatDaily:req.body.repeatDaily});
+  if (!id) return res.status(409).json({success:false,error:'Another event is scheduled at that time'});
+  res.status(201).json({success:true,data:{id}});
+});
+
+scenesRouter.patch(root + '/schedule/:jobId', authorize('schedule:manage'), validateBody(z.object({
+  dueAt:z.number().int().max(253402214400000), previousDueAt:z.number().int()
+}).strict()), (req,res) => {
+  const {dueAt,previousDueAt} = req.body;
+  const now = Date.now();
+  if (dueAt <= now) return res.status(400).json({success:false,error:'Choose a future time'});
+  const result = getSqliteDatabase().prepare(`UPDATE OR IGNORE program_schedule SET dueAt=?
+    WHERE stationId=? AND id=? AND state='pending' AND dueAt=? AND dueAt>?`)
+    .run(dueAt,req.params.id,req.params.jobId,previousDueAt,now);
+  if (!result.changes) return res.status(409).json({success:false,error:'The event changed, is already due, or the new time is occupied'});
+  res.json({success:true});
+});
+
+scenesRouter.delete(root + '/schedule/:jobId', authorize('schedule:manage'), (req,res) => {
+  const removed = getSqliteDatabase().prepare("DELETE FROM program_schedule WHERE stationId=? AND id=? AND state='pending'")
+    .run(req.params.id,req.params.jobId);
+  if (!removed.changes) return res.status(409).json({success:false,error:'The event is no longer pending'});
+  res.json({success:true});
+});
+
+scenesRouter.post(root + '/schedule-list', authorize('schedule:manage'), validateBody(z.object({
+  dueAt:z.number().int().max(253402214400000),
+  fillerSceneId:z.string().uuid().optional(),
+  items:z.array(z.object({ sceneId:z.string().uuid(), durationSeconds:z.number().int().min(1).max(86400) }).strict())
+    .min(2).max(32)
+}).strict()), (req,res) => {
+  const db = getSqliteDatabase();
+  const stationId = req.params.id;
+  let dueAt = req.body.dueAt;
+  if (dueAt <= Date.now()) return res.status(400).json({success:false,error:'Choose a future time'});
+  const entries = req.body.items.map(({ sceneId, durationSeconds }) => {
+    const entry = {stationId, userId:req.user.id, sceneId, scene:readScene(db,stationId,sceneId)?.scene, dueAt};
+    dueAt += durationSeconds * 1000;
+    return entry;
+  });
+  const fillerId = req.body.fillerSceneId;
+  if (fillerId) {
+    const saved = readScene(db,stationId,fillerId);
+    if (!saved) return res.sendStatus(404);
+    if (JSON.parse(saved.scene).type === 'network') {
+      return res.status(400).json({success:false,error:'Choose a local scene for filler'});
+    }
+    entries.push({stationId,userId:req.user.id,sceneId:fillerId,scene:saved.scene,dueAt});
+  }
+  if (entries.some(entry => !entry.scene)) return res.sendStatus(404);
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const ids = [];
+    for (const entry of entries) {
+      const id = createProgramSchedule(db, entry);
+      if (!id) {
+        db.exec('ROLLBACK');
+        return res.status(409).json({success:false,error:'A list entry conflicts with an existing event'});
+      }
+      ids.push(id);
+    }
+    db.exec('COMMIT');
+    res.status(201).json({success:true,data:{ids}});
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 });
 
 scenesRouter.get(root, (req, res) => {

@@ -9,7 +9,7 @@ import { translations } from '../i18n/translations.js';
 import { Card, CardHeader, CardTitle, CardContent } from '@mcr/ui';
 import { Layers, Eye, EyeOff, Video } from 'lucide-react';
 
-function IndependentScenes({ stationId, language }) {
+function IndependentScenes({ stationId, language, canSchedule }) {
   const status = useProgramStatus(stationId);
   const running = status?.state === 'running';
   const path = stationPath(stationId, '/program/input-preview');
@@ -18,7 +18,7 @@ function IndependentScenes({ stationId, language }) {
   if (!status?.configured) return null;
   return <LocalProgramScene stationId={stationId} language={language} running={running}
     inputFrame={inputFrame} inputReady={status.obs === 'ready'} secondInputFrame={secondInputFrame}
-    secondInputReady={status.obs2 === 'ready'} secondInputConfigured={Boolean(status.secondPort)} />;
+    secondInputReady={status.obs2 === 'ready'} secondInputConfigured={Boolean(status.secondPort)} canSchedule={canSchedule} />;
 }
 
 export function SourcesScenesPage() {
@@ -66,7 +66,7 @@ export function SourcesScenesPage() {
         </select>
       </div>
 
-      {canControl && <IndependentScenes key={currentStation.id} stationId={currentStation.id} language={language} />}
+      {canControl && <IndependentScenes key={currentStation.id} stationId={currentStation.id} language={language} canSchedule={permissions.includes('*') || permissions.includes('schedule:manage')} />}
       {/* Two Column Layout: Scenes List & Sources Inspector */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
         {/* Scenes List Column */}

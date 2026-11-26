@@ -22,7 +22,7 @@ export function forwardProgram(port) {
       timeout: 220000
     }, response => {
       res.statusCode = response.statusCode;
-      for (const name of ['content-type', 'content-length', 'cache-control', 'content-range', 'accept-ranges']) {
+      for (const name of ['content-type', 'content-length', 'content-disposition', 'cache-control', 'content-range', 'accept-ranges', 'x-accel-buffering']) {
         if (response.headers[name] !== undefined) res.setHeader(name, response.headers[name]);
       }
       response.on('error', () => res.destroy());

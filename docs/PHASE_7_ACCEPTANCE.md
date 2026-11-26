@@ -1,5 +1,7 @@
 # Phase 7 · Staging broadcast acceptance
 
+The [25 November readiness run](BROADCAST_READINESS_AR.md) supersedes the missing local-scene and direct-URL results below. Its combined loopback fixture used a native video-plus-image scene and a server-configured MPEG-TS URL, with reception after explicit Take and fallback on URL loss. The separate control-restart fixture also verified that the decoupled Program runtime continues during a web restart and recovers saved sources on runtime boot. The report below records the original revision and its retained evidence.
+
 **Disposition: Failed for the full requested workflow.** Independent Program passed its implemented slate/OBS broadcast path with live graphics, ads and receiver-decoded audio. Two required operator actions are missing: creating a native scene containing a video and an image, and previewing/taking a second scene from a registered external URL. A further difference from the architecture target is that terminating the control service also ends its worker session.
 
 Tested 24 November 2026 on local Windows staging, revision `ba5a1f0` plus the watermark fix below. The API ran as a separate Node process against disposable SQLite. Chrome operated on the built frontend. A portable OBS Studio instance used a private profile, synthetic red video and 880 Hz audio. Every media connection used loopback. The operator steps are in the [quick guide](STAGING_OPERATOR_GUIDE.md).

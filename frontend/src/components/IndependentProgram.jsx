@@ -5,6 +5,7 @@ import { api, stationPath } from '../context/api.js';
 import { useMonitorFrame } from '../context/useProgramMonitor.js';
 import { pollWhileVisible } from '../context/pollWhileVisible.js';
 import { ProgramVideoInput } from './ProgramVideoInput.jsx';
+import { ProgramAudioMonitor } from './ProgramAudioMonitor.jsx';
 
 const en = { title: 'Independent Program', start: 'Start Program', stop: 'Stop Program', obs: 'Take Input 1', obs2: 'Take Input 2',
   fallback: 'Take slate', running: 'Running', stopped: 'Stopped', failed: 'Worker failed', starting: 'Starting',
@@ -12,6 +13,12 @@ const en = { title: 'Independent Program', start: 'Start Program', stop: 'Stop P
 const ar = { title: 'خرج البرنامج المستقل', start: 'تشغيل البرنامج', stop: 'إيقاف البرنامج', obs: 'بث المدخل الأول', obs2: 'بث المدخل الثاني',
   fallback: 'بث لوحة الانتظار', running: 'قيد التشغيل', stopped: 'متوقف', failed: 'تعطل محرك البث', starting: 'جارٍ التشغيل',
   stopping: 'جارٍ الإيقاف', disconnected: 'لا توجد إشارة', warming: 'جارٍ تثبيت الإشارة', black: 'صورة سوداء', frozen: 'صورة متجمّدة', silent: 'صمت صوتي', ready: 'جاهز', slate: 'لوحة الانتظار', receiver: 'المستقبل المحلي' };
+const receiverStatus = {
+  en: { waiting: 'Waiting for receiver', decoding: 'Audio and video decoded', 'video-only': 'Video only',
+    'audio-only': 'Audio only', 'no-media': 'No decoded media', offline: 'Receiver reports stopped' },
+  ar: { waiting: 'بانتظار تقرير المستقبل', decoding: 'الصوت والصورة يصلان', 'video-only': 'الصورة فقط',
+    'audio-only': 'الصوت فقط', 'no-media': 'لا توجد وسائط مفكوكة الترميز', offline: 'توقفت تقارير المستقبل' },
+};
 
 function PictureMonitor({ title, frame, waiting }) {
   return <figure className="min-w-0">
@@ -21,6 +28,37 @@ function PictureMonitor({ title, frame, waiting }) {
         : <p className="px-2 text-center text-sm text-zinc-400">{waiting}</p>}
     </div>
   </figure>;
+}
+
+function InputAudioControl({ language, label, setting, pending, onApply }) {
+  const [draft, setDraft] = useState(null);
+  const arabic = language === 'ar';
+  const mode = draft?.mode ?? setting.mode;
+  const gainDb = draft?.gainDb ?? setting.gainDb;
+  return <fieldset className="flex flex-wrap items-center gap-3 rounded border border-zinc-700 p-2 text-sm" disabled={pending}>
+    <legend className="px-1">{label}</legend>
+    <label className="flex items-center gap-2">
+      {arabic ? 'التوجيه' : 'Routing'}
+      <select className="rounded border border-zinc-600 bg-zinc-950 p-1" value={mode}
+        onChange={event => setDraft({ ...draft, mode: event.target.value })}>
+        <option value="follow">{arabic ? 'يتبع الصورة' : 'Follow picture'}</option>
+        <option value="on">{arabic ? 'يمتزج عند الجاهزية' : 'Mix when ready'}</option>
+        <option value="off">{arabic ? 'كتم المدخل' : 'Mute input'}</option>
+      </select>
+    </label>
+    <label className="flex items-center gap-2">
+      {arabic ? 'خفض المستوى' : 'Attenuation'}
+      <input type="range" min={-30} max={0} value={gainDb}
+        onChange={event => setDraft({ ...draft, gainDb: Number(event.target.value) })} />
+      <span dir="ltr" className="tabular-nums">{gainDb} dB</span>
+    </label>
+    <button type="button" className="rounded border border-zinc-600 px-2 py-1 disabled:opacity-50"
+      disabled={mode === setting.mode && gainDb === setting.gainDb}
+      onClick={async () => { if (await onApply({ mode, gainDb })) setDraft(null); }}>
+      {arabic ? 'تطبيق على Program' : 'Apply to Program'}
+    </button>
+    {setting.routed && <span>{arabic ? 'موجّه إلى Program' : 'Routed to Program'}</span>}
+  </fieldset>;
 }
 
 export function IndependentProgram({ stationId, language, canControl }) {
@@ -52,7 +90,7 @@ export function IndependentProgram({ stationId, language, canControl }) {
     try {
       setStatus((await api(path + suffix, { method: 'POST', body })).data);
     }
-    catch (err) { setError(err.message); }
+    catch (err) { setError(err.message); return false; }
     finally { setPending(false); }
   }
   if (!status?.configured && !readError && !error) return null;
@@ -97,6 +135,7 @@ export function IndependentProgram({ stationId, language, canControl }) {
     </p>}
     {running && [
       [language === 'ar' ? 'مستوى صوت المدخل' : 'Input audio level', status.inputAudioDbfs],
+      ...(status.secondPort ? [[language === 'ar' ? 'مستوى صوت المدخل الثاني' : 'Input 2 audio level', status.input2AudioDbfs]] : []),
       [language === 'ar' ? 'مستوى صوت Program' : 'Program audio level', status.programAudioDbfs]
     ].map(([label, value]) => <div key={label} className="flex flex-wrap items-center gap-2 text-sm text-zinc-300">
       <span>{label}</span>
@@ -105,13 +144,50 @@ export function IndependentProgram({ stationId, language, canControl }) {
         <span dir="ltr" className="tabular-nums">{value} dBFS</span>
       </> : <span>{language === 'ar' ? 'لا توجد قراءة' : 'No reading'}</span>}
     </div>)}
-    {running && status.srt && status.srt !== 'disabled' && <p role="status" className="text-sm text-zinc-300">
-      SRT {status.srtEncrypted && (language === 'ar' ? 'مشفّر' : 'encrypted')} · {({
-        connecting: language === 'ar' ? 'جارٍ الاتصال' : 'Connecting',
-        sending: language === 'ar' ? 'جارٍ الإرسال' : 'Sending',
-        retrying: language === 'ar' ? 'إعادة المحاولة' : 'Retrying'
-      })[status.srt]}
+    {running && status.audioMonitorAvailable &&
+      <ProgramAudioMonitor key={status.session} path={path + '/audio-monitor'} language={language} />}
+    {running && canControl && Object.entries(status.inputAudioMix ?? {}).map(([input, setting]) =>
+      <InputAudioControl key={status.session + input} language={language} setting={setting} pending={pending}
+        label={input === 'obs' ? (language === 'ar' ? 'صوت المدخل الأول' : 'Primary input audio')
+          : (language === 'ar' ? 'صوت المدخل الثاني' : 'Secondary input audio')}
+        onApply={draft => send({ action: 'input-audio', inputAudio: { input, ...draft } })} />)}
+    {running && (status.srtDestinations ?? (status.srt && status.srt !== 'disabled'
+      ? [{ id: 'primary', state: status.srt, encrypted: status.srtEncrypted }] : [])).map(destination =>
+      <p key={destination.id} role="status" className="text-sm text-zinc-300">
+        {destination.id === 'primary'
+          ? (language === 'ar' ? 'وجهة SRT الأولى' : 'Primary SRT destination')
+          : (language === 'ar' ? 'وجهة SRT الثانية' : 'Secondary SRT destination')}
+        {destination.encrypted && (language === 'ar' ? ' · مشفّر' : ' · Encrypted')} · {({
+          connecting: language === 'ar' ? 'جارٍ الاتصال' : 'Connecting',
+          sending: language === 'ar' ? 'جارٍ الإرسال' : 'Sending',
+          retrying: language === 'ar' ? 'إعادة المحاولة' : 'Retrying'
+        })[destination.state]}
+        {destination.receiver && <> · {language === 'ar' ? 'المستقبل' : 'Receiver'}{' '}
+          {(receiverStatus[language] ?? receiverStatus.en)[destination.receiver]}</>}
+      </p>)}
+    {running && status.hls && status.hls !== 'disabled' && <p role="status" className="text-sm text-zinc-300">
+      {status.hls === 'ready'
+        ? <a className="underline" href={'/api/v1' + path + '/hls/' + status.session + '/index.m3u8'}>
+          {language === 'ar' ? 'رابط بث HLS' : 'HLS playlist'}
+        </a>
+        : status.hls === 'failed' ? (language === 'ar' ? 'تعذّر خرج HLS' : 'HLS output unavailable')
+          : (language === 'ar' ? 'جارٍ تجهيز خرج HLS' : 'Preparing HLS output')}
     </p>}
+    {status?.deliveryIncidents?.length > 0 && <details className="rounded border border-zinc-700 p-2 text-sm">
+      <summary className="cursor-pointer">{language === 'ar' ? 'سجل انقطاع المخارج واستعادتها' : 'Output incident history'}</summary>
+      <ul className="mt-2 space-y-1">
+        {status.deliveryIncidents.slice().reverse().map(incident => <li key={incident.id}>
+          {incident.destination === 'hls' ? 'HLS' : incident.destination === 'primary'
+            ? (language === 'ar' ? 'وجهة SRT الأولى' : 'Primary SRT')
+            : (language === 'ar' ? 'وجهة SRT الثانية' : 'Secondary SRT')}
+          {' · '}
+          {incident.state === 'recovered' ? (language === 'ar' ? 'استُعيد الإرسال' : 'Delivery recovered')
+            : (language === 'ar' ? 'تعذّر الإرسال' : 'Delivery unavailable')}
+          {' · '}
+          <time dateTime={incident.at}>{new Date(incident.at).toLocaleTimeString(language === 'ar' ? 'ar' : 'en')}</time>
+        </li>)}
+      </ul>
+    </details>}
     {status?.recordingFile && <p className={status.recording === 'failed' ? 'text-sm text-red-300' : 'text-sm text-zinc-300'}>
       {language === 'ar' ? 'التسجيل' : 'Recording'} · {({
         starting: language === 'ar' ? 'جارٍ البدء' : 'Starting',

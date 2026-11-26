@@ -51,7 +51,21 @@ Object.assign(process.env, {
   MCR_ADMIN_PASSWORD: '',
   MCR_PROGRAM_INPUT_PORT: '25100',
   MCR_PROGRAM_OUTPUT_PORT: '25402',
-  MCR_PROGRAM_SLATE: 'blue'
+  MCR_PROGRAM_SLATE: 'blue',
+  MCR_PROGRAM_RUNTIME_PORT: '',
+  MCR_PROGRAM_INPUT_HOST: '127.0.0.1',
+  MCR_PROGRAM_INPUT_URL: '',
+  MCR_PROGRAM_SECOND_INPUT_PORT: '',
+  MCR_PROGRAM_AUTO_BACKUP: '0',
+  MCR_PROGRAM_RECORDING_DIR: '',
+  MCR_PROGRAM_HLS_DIR: '',
+  MCR_PROGRAM_SRT_URL: '',
+  MCR_PROGRAM_SRT_PASSPHRASE: '',
+  MCR_PROGRAM_SECOND_SRT_URL: '',
+  MCR_PROGRAM_SECOND_SRT_PASSPHRASE: '',
+  MCR_PROGRAM_BLACK_SECONDS: '0',
+  MCR_PROGRAM_FREEZE_SECONDS: '0',
+  MCR_PROGRAM_SILENCE_SECONDS: '0',
 });
 const { RepositoryFactory: repo } = await import('../src/infrastructure/repositories/repository-factory.js');
 const { CryptoService } = await import('../src/infrastructure/security/crypto-service.js');
@@ -95,6 +109,9 @@ let service,
   receiver,
   obs,
   browser,
+  urlServer,
+  urlSender,
+  urlEnabled = true,
   latest,
   segment = 0;
 let obsCount = 0;
@@ -102,7 +119,7 @@ async function until(label, test, ms = 24000) {
   const limit = Date.now() + ms;
   while (Date.now() < limit) {
     if (await test()) return;
-    await sleep(120);
+    await sleep(300);
   }
   throw Error('Timeout: ' + label + ' ' + JSON.stringify(latest));
 }
@@ -250,6 +267,7 @@ function receive() {
         time: Date.now(),
         id,
         center: pixel(80, 45),
+        sceneLayer: pixel(58, 32),
         mark: pixel(14, 8),
         left: pixel(22, 64),
         right: pixel(122, 65),
@@ -273,7 +291,7 @@ async function endReceiver() {
 const green = (p) => p[1] > 180 && p[0] < 60 && p[2] < 60;
 const red = (p) => p[0] > 180 && p[1] < 70 && p[2] < 70;
 const blue = (p) => p[2] > 180 && p[0] < 70 && p[1] < 70;
-async function observed(label, color, tone) {
+async function observed(label, color, tone, extra = () => true) {
   const start = Date.now();
   await until(
     label,
@@ -281,6 +299,7 @@ async function observed(label, color, tone) {
       latest?.time > start &&
       color(latest.center) &&
       green(latest.mark) &&
+      extra(latest) &&
       latest.audio &&
       (tone ? latest.audio.rms > 0.005 && Math.abs(latest.audio.hz - 880) < 35 : latest.audio.rms < 0.002)
   );
@@ -290,6 +309,21 @@ const png = (color) =>
   sharp({ create: { width: 120, height: 60, channels: 3, background: color } })
     .png()
     .toBuffer();
+async function startDirectSource() {
+  urlServer = createServer((req, res) => {
+    if (!urlEnabled || req.url !== '/program.ts') return res.writeHead(503).end();
+    const proc = spawn('ffmpeg', ['-nostdin','-loglevel','error','-re','-stream_loop','-1',
+      '-i',join(portable,'fixture.mp4'),'-c','copy','-f','mpegts','pipe:1'],
+    { windowsHide:true, stdio:['ignore','pipe','ignore'] });
+    urlSender = proc;
+    res.writeHead(200, { 'Content-Type':'video/mp2t' });
+    proc.stdout.pipe(res);
+    res.once('close', () => proc.kill());
+  });
+  urlServer.listen(0, '127.0.0.1');
+  await once(urlServer, 'listening');
+  return 'http://127.0.0.1:' + urlServer.address().port + '/program.ts';
+}
 try {
   await startService();
   assert.equal((await request('/program', 'GET', undefined, null)).status, 401);
@@ -414,6 +448,23 @@ try {
   await page.getByRole('button', { name: /^Stop Program$|^إيقاف البرنامج$/ }).waitFor();
   assert.equal((await data('/program')).session, active.session);
   await observed('Browser refresh retained Program', blue, false);
+  await browser.close();
+  browser = null;
+  await observed('Closing the operator browser retained Program', blue, false);
+  const localVideo = await upload('local-scene', readFileSync(join(portable, 'fixture.mp4')), 'video/mp4');
+  const image = await upload('local-scene-layer', await png('#00ffff'), 'image/png');
+  const scene = { id:randomUUID(), name:'Native fixture', video:localVideo.id, image:image.id, x:30, y:25, w:14, h:20 };
+  assert((await request('/program/local-scene', 'PUT', scene)).ok);
+  const preview = await data('/program/local-scene/preview', 'POST', scene);
+  assert.match(preview, /^data:image\/jpeg;base64,/);
+  await observed('Native scene preview left Program on slate', blue, false);
+  await data('/program/local-scene/take', 'POST', scene);
+  await observed('Native scene receiver decodes video, positioned image and sound', red, true,
+    ({ sceneLayer }) => sceneLayer[0] < 70 && sceneLayer[1] > 180 && sceneLayer[2] > 180);
+  await send('fallback');
+  assert.equal(db.prepare('DELETE FROM ad_frames WHERE stationId=? AND asset=? AND frame=0').run(station.id, localVideo.id).changes, 1);
+  assert.equal((await request('/program/local-scene/take', 'POST', scene)).status, 409);
+  await observed('Unavailable native scene stays off air', blue, false);
   obs = contribute();
   await until('first OBS connection', async () => (await data('/program')).obs === 'ready', 45000);
   await send('obs');
@@ -494,7 +545,35 @@ try {
   );
   record('Missing stored pink creative transparent; next yellow item aired', { samples: restored.length });
   await send('stop');
+  await endReceiver();
+  await stop(service);
+  service = null;
+  await startService({ MCR_PROGRAM_INPUT_URL:await startDirectSource() });
+  receive();
+  const urlProgram = await send('start');
+  const network = { id:randomUUID(), name:'Direct URL fixture', type:'network' };
+  assert((await request('/program/local-scene', 'PUT', network)).ok);
+  await until('MPEG-TS URL decoded in Preview', async () => {
+    const current = await data('/program');
+    assert.equal(current.inputMode, 'url');
+    assert.equal(current.source, 'fallback');
+    return current.obs === 'ready' && Boolean(await data('/program/input-preview'));
+  });
+  await observed('Direct URL preview left Program on slate', blue, false);
+  await data('/program/local-scene/take', 'POST', network);
+  await observed('Direct URL scene receiver decodes marked red video and audio', red, true);
+  urlEnabled = false;
+  await stop(urlSender);
+  await observed('Unavailable direct URL falls back in the same session', blue, false);
+  assert.equal((await data('/program')).session, urlProgram.session);
+  urlEnabled = true;
+  await until('Direct URL recovers to Preview', async () => (await data('/program')).obs === 'ready');
+  await observed('Recovered direct URL stays in Preview until retake', blue, false);
+  await data('/program/local-scene/take', 'POST', network);
+  await observed('Recovered direct URL is heard and seen after retake', red, true);
+  await send('stop');
   record('Final Program stop');
+  record('Combined OBS, native scene and URL receiver checks passed');
 } finally {
   await browser?.close();
   await stop(obs);
@@ -502,6 +581,11 @@ try {
   if (service) {
     await request('/program', 'POST', { action: 'stop' }).catch(() => {});
     await stop(service);
+  }
+  await stop(urlSender);
+  if (urlServer) {
+    urlServer.closeAllConnections();
+    await new Promise(resolve => urlServer.close(resolve));
   }
   writeFileSync(
     join(dir, 'observations.json'),

@@ -180,7 +180,15 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
     body: { name: 'Studio scene', stationId: station.id, action: 'scene', sceneName: 'Program B' }
   });
   assert.equal(macro.status, 201);
+  const audioAction = {
+    method: 'POST', body: { action: 'input-audio', inputAudio: { input: 'obs2', mode: 'on', gainDb: -12 } }
+  };
+  assert.equal((await request(stationPath + '/program', { ...audioAction, organizationId: 'another-organization' })).status, 404);
+  assert.equal((await request(stationPath + '/program', {
+    ...authorized, ...audioAction, body: { action: 'input-audio', inputAudio: { input: 'obs2', mode: 'on', gainDb: 1 } }
+  })).status, 400);
   await RepositoryFactory.getUserRepository().update(admin.id, { role: 'VIEWER' });
+  assert.equal((await request(stationPath + '/program', { ...authorized, ...audioAction })).status, 403);
   assert.equal((await request(stationPath + '/scenes/switch', {
     ...authorized, method: 'POST', body: { sceneName: 'Program B' }
   })).status, 403);

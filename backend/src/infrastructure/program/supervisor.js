@@ -2,16 +2,25 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { mkdtempSync } from 'node:fs';
+import { readdir, rmdir, unlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import { isIPv4 } from 'node:net';
 import { networkInterfaces } from 'node:os';
+import { z } from 'zod';
 import { PROGRAM_CANVAS } from '@mcr/shared';
 import { storedWatermark } from './watermark.js';
 import { storedTicker } from './ticker.js';
 import { createAdRenderer } from './ads.js';
+import { receiverHealth } from './receiver-health.js';
 
 const worker = fileURLToPath(new URL('./worker.py', import.meta.url));
 const failure = (message, statusCode = 409) => Object.assign(new Error(message), { statusCode });
+export const programInputAudioSchema = z.object({
+  input: z.enum(['obs', 'obs2']),
+  mode: z.enum(['follow', 'on', 'off']),
+  gainDb: z.number().int().min(-30).max(0),
+}).strict();
 let child;
 let pending;
 let watchdog;
@@ -19,6 +28,11 @@ let frame = null;
 let inputFrame = null;
 let secondInputFrame = null;
 let monitorFrame = null;
+let hlsDirectory;
+const audioListeners = new Set();
+const deliveryIssues = new Set();
+let deliveryIncidents = [];
+let incidentSequence = 0;
 let renderer;
 let scene;
 export const usesLocalSceneAsset = asset => scene?.assets.includes(asset) ?? false;
@@ -56,6 +70,53 @@ export function updateAds(plan) { renderer?.update(plan); }
 export const previewFrame = () => frame;
 export const programMonitorFrame = () => status.state === 'running' &&
   monitorFrame && Date.now() - monitorFrame.at < 2000 ? monitorFrame.image : null;
+
+const hlsFile = /^(?:index\.m3u8|segment\d{5,10}\.ts)$/;
+export function programHlsDirectory(id, session, filename) {
+  if (configured(id) && status.state === 'running' && status.hls === 'ready' &&
+    session === status.session && hlsFile.test(filename)) return hlsDirectory;
+  return undefined;
+}
+
+async function cleanHls(directory) {
+  try {
+    const files = await readdir(directory);
+    await Promise.allSettled(files.filter(name => hlsFile.test(name)).map(name => unlink(join(directory, name))));
+    await rmdir(directory);
+  } catch {
+    // Leave unknown files or unreachable storage for the host administrator.
+  }
+}
+
+function setAudioMonitorListening(enabled) {
+  if (status.state === 'running' && child?.stdin.writable) {
+    child.stdin.write(JSON.stringify({ audioMonitor: enabled }) + '\n');
+  }
+}
+
+export function listenProgramAudio(id, res) {
+  if (!configured(id) || status.state !== 'running' || !status.audioMonitorAvailable) {
+    throw failure('Program audio monitor is unavailable', 503);
+  }
+  if (audioListeners.size >= 8) throw failure('Program audio monitor is at capacity', 429);
+  res.set({
+    'Content-Type': 'audio/mpeg',
+    'Cache-Control': 'private, no-store, no-transform',
+    'X-Accel-Buffering': 'no',
+  });
+  res.once('close', () => {
+    audioListeners.delete(res);
+    if (!audioListeners.size) setAudioMonitorListening(false);
+  });
+  audioListeners.add(res);
+  if (audioListeners.size === 1) setAudioMonitorListening(true);
+  res.flushHeaders();
+}
+
+function closeProgramAudio() {
+  for (const listener of audioListeners) listener.end();
+  audioListeners.clear();
+}
 export function inputPreviewFrame(input = 'primary') {
   const secondary = input === 'secondary';
   const frame = secondary ? secondInputFrame : inputFrame;
@@ -76,14 +137,36 @@ export function configured(id) {
 }
 
 export function programStatus(id) {
-  return configured(id) ? { configured: true, ...status } : { configured: false };
+  if (!configured(id)) return { configured: false };
+  const result = { configured: true, ...status, deliveryIncidents };
+  if (!status.srtDestinations) return result;
+  result.srtDestinations = status.srtDestinations.map(destination => {
+    const receiver = receiverHealth(destination.id, status.session);
+    return receiver ? { ...destination, receiver } : destination;
+  });
+  return result;
+}
+
+function reportDelivery(key, unavailable, ready) {
+  let state;
+  if (unavailable && !deliveryIssues.has(key)) {
+    deliveryIssues.add(key);
+    state = 'unavailable';
+  } else if (ready && deliveryIssues.delete(key)) {
+    state = 'recovered';
+  }
+  if (state) {
+    deliveryIncidents = [...deliveryIncidents.slice(-19), {
+      id: ++incidentSequence, destination:key, state, at:new Date().toISOString(),
+    }];
+  }
 }
 
 export function setSourceRecovery(session, recovery) {
   if (status.session === session && status.state === 'running') status = { ...status, sourceRecovery: recovery };
 }
 
-function settle(error, data = { configured: true, ...status }) {
+function settle(error, data = programStatus(process.env.MCR_PROGRAM_STATION_ID)) {
   if (!pending) return;
   clearTimeout(pending.timer);
   if (error) pending.reject(error);
@@ -107,6 +190,29 @@ function port(value) {
   return number;
 }
 
+function srtDestination(id, prefix) {
+  const configuredSrt = process.env[prefix + '_URL'];
+  const srt = configuredSrt ? URL.parse(configuredSrt) : null;
+  if (configuredSrt && (!srt || srt.protocol !== 'srt:' || !srt.hostname || !Number(srt.port) ||
+      srt.username || srt.password || srt.hash || (srt.pathname && srt.pathname !== '/') ||
+      srt.searchParams.getAll('mode').some(mode => mode !== 'caller'))) {
+    throw failure('Program SRT destination must use an explicit host and port in caller mode', 503);
+  }
+  const passphrase = process.env[prefix + '_PASSPHRASE'];
+  if (passphrase) {
+    const length = Buffer.byteLength(passphrase);
+    if (!srt || length < 10 || length > 79 || passphrase.includes('\0')) {
+      throw failure('SRT encryption requires a destination and a 10–79 byte passphrase', 503);
+    }
+    srt.searchParams.set('passphrase', passphrase);
+    srt.searchParams.set('pbkeylen', '32');
+  }
+  if (!srt) return null;
+  // GStreamer defaults to caller mode. Set it explicitly for both slots.
+  srt.searchParams.set('mode', 'caller');
+  return { id, url: srt.href, encrypted: Boolean(srt.searchParams.get('passphrase')) };
+}
+
 function start(watermark, ads, ticker) {
   const blackSeconds = Number(process.env.MCR_PROGRAM_BLACK_SECONDS ?? 0);
   const silenceSeconds = Number(process.env.MCR_PROGRAM_SILENCE_SECONDS ?? 0);
@@ -120,23 +226,12 @@ function start(watermark, ads, ticker) {
   if (!Number.isInteger(blackSeconds) || blackSeconds < 0 || blackSeconds > 60) {
     throw failure('Black detection duration must be 0–60 seconds', 503);
   }
-  const configuredSrt = process.env.MCR_PROGRAM_SRT_URL;
-  const srt = configuredSrt ? URL.parse(configuredSrt) : null;
-  if (configuredSrt && (!srt || srt.protocol !== 'srt:' || !srt.hostname || !Number(srt.port) ||
-      srt.username || srt.password || srt.hash || (srt.pathname && srt.pathname !== '/') ||
-      srt.searchParams.getAll('mode').some(mode => mode !== 'caller'))) {
-    throw failure('Program SRT destination must use an explicit host and port in caller mode', 503);
-  }
-  const passphrase = process.env.MCR_PROGRAM_SRT_PASSPHRASE;
-  if (passphrase) {
-    const length = Buffer.byteLength(passphrase);
-    if (!srt || length < 10 || length > 79 || passphrase.includes('\0')) {
-      throw failure('SRT encryption requires a destination and a 10–79 byte passphrase', 503);
-    }
-    srt.searchParams.set('passphrase', passphrase);
-    srt.searchParams.set('pbkeylen', '32');
-  }
-  const srtEncrypted = Boolean(srt?.searchParams.get('passphrase'));
+  const destinations = [
+    srtDestination('primary', 'MCR_PROGRAM_SRT'),
+    srtDestination('secondary', 'MCR_PROGRAM_SECOND_SRT'),
+  ].filter(Boolean);
+  const srtDestinations = destinations.map(({ id, encrypted }) => ({ id, encrypted, state: 'connecting' }));
+  const primarySrt = srtDestinations.find(({ id }) => id === 'primary');
   const recordingDir = process.env.MCR_PROGRAM_RECORDING_DIR;
   if (recordingDir && !isAbsolute(recordingDir)) throw failure('Program recording directory must be absolute', 503);
   const session = randomUUID();
@@ -169,6 +264,13 @@ function start(watermark, ads, ticker) {
   for (const key of Object.keys(process.env)) {
     if (/^(path|systemroot|windir|temp|tmp|home|userprofile|localappdata|appdata|lang|ld_library_path|gst_registry|gst_plugin_path)$/i.test(key)) env[key] = process.env[key];
   }
+  const hlsRoot = process.env.MCR_PROGRAM_HLS_DIR;
+  let directory;
+  if (hlsRoot && isAbsolute(hlsRoot)) {
+    try { directory = mkdtempSync(join(hlsRoot, 'program-hls-')); }
+    catch { /* HLS failure is isolated from the other Program outputs. */ }
+  }
+  hlsDirectory = directory;
   const proc = spawn(process.env.MCR_PROGRAM_PYTHON || 'python', ['-u', worker, String(input), String(output), slate, inputHost],
     { env, windowsHide: true, stdio: ['pipe', 'pipe', 'inherit'] });
   child = proc;
@@ -193,13 +295,20 @@ function start(watermark, ads, ticker) {
     }
   }, 40);
   status = { state: 'starting', session, source: 'fallback', obs: 'disconnected', outputPort: output, recordingFile,
-    srt: srt ? 'connecting' : 'disabled', srtEncrypted, secondPort, autoBackup,
+    srt: primarySrt?.state ?? 'disabled', srtEncrypted: primarySrt?.encrypted ?? false,
+    srtDestinations, secondPort, autoBackup, hls: directory ? 'starting' : hlsRoot ? 'failed' : 'disabled',
     ...(secondPort ? { secondInputHost: inputHost } : {}),
     ...(inputUrl ? { inputMode: 'url' } : { inputMode: 'udp', inputHost, inputPort: input }) };
+  deliveryIncidents = [];
+  deliveryIssues.clear();
+  reportDelivery('hls', status.hls === 'failed', false);
   const result = waitFor('start');
   proc.stdin.on('error', () => proc.kill());
   proc.stdin.write(JSON.stringify({ canvas: PROGRAM_CANVAS, ...watermark, ticker, inputUrl: inputUrl?.href,
-    recordingPath: recordingFile ? join(recordingDir, recordingFile) : null, srtUrl: srt?.href, blackSeconds, freezeSeconds,
+    recordingPath: recordingFile ? join(recordingDir, recordingFile) : null,
+    audioMonitor: process.env.MCR_PROGRAM_AUDIO_MONITOR !== '0',
+    hlsPath: directory,
+    srtDestinations: destinations.map(({ id, url }) => ({ id, url })), blackSeconds, freezeSeconds,
     silenceSeconds, secondPort, autoBackup }) + '\n');
   proc.on('error', () => settle(failure('Could not launch Program worker', 503)));
   createInterface({ input: proc.stdout }).on('line', line => {
@@ -219,12 +328,32 @@ function start(watermark, ads, ticker) {
     }
     if (message.preview) { frame = message.preview; return; }
     if (message.programMonitor) { monitorFrame = { image: message.programMonitor, at: Date.now() }; return; }
+    if (message.programAudio) {
+      if (audioListeners.size) {
+        const chunk = Buffer.from(message.programAudio, 'base64');
+        for (const listener of audioListeners) {
+          if (!listener.destroyed && !listener.write(chunk)) listener.destroy();
+        }
+      }
+      return;
+    }
     if (message.inputPreview) { inputFrame = { image: message.inputPreview, at: Date.now() }; return; }
     if (message.input2Preview) { secondInputFrame = { image: message.input2Preview, at: Date.now() }; return; }
     if (message.recordingFinal) { status.recording = message.recordingFinal; return; }
     if (!message.status || status.state === 'stopping') return;
-    status = { ...status, ...message.status,
-      sceneVideo: message.status.source === 'scene' ? scene?.assets[0] : undefined };
+    const { srtStates, ...workerStatus } = message.status;
+    status = { ...status, ...workerStatus,
+      sceneVideo: workerStatus.source === 'scene' ? scene?.assets[0] : undefined };
+    reportDelivery('hls', status.hls === 'failed', status.hls === 'ready');
+    if (srtStates) {
+      status.srtDestinations = srtDestinations.map(destination => ({
+        ...destination, state: srtStates[destination.id] ?? destination.state,
+      }));
+      status.srt = srtStates.primary ?? 'disabled';
+      for (const destination of status.srtDestinations) {
+        reportDelivery(destination.id, destination.state === 'retrying', destination.state === 'sending');
+      }
+    }
     if (status.obs === 'disconnected') inputFrame = null;
     if (status.obs2 === 'disconnected') secondInputFrame = null;
     if (status.source !== 'scene' && (pending?.action !== 'scene' || message.reply === 'sceneUnavailable')) scene = undefined;
@@ -235,8 +364,11 @@ function start(watermark, ads, ticker) {
   });
   proc.on('close', () => {
     clearInterval(adTimer);
+    if (directory) void cleanHls(directory);
     if (child !== proc) return;
     child = undefined;
+    hlsDirectory = undefined;
+    closeProgramAudio();
     renderer = undefined;
     scene = undefined;
     frame = null;
@@ -255,12 +387,13 @@ function start(watermark, ads, ticker) {
 export function stopProgram() {
   if (!child) return;
   status.state = 'stopping';
+  closeProgramAudio();
   child.stdin.end('stop\n');
   clearTimeout(watchdog);
   watchdog = setTimeout(() => child?.kill(), 3000);
 }
 
-export async function programAction(id, action, watermark = { revision: 0, bitmap: '' }, ads, gainDb, ticker) {
+export async function programAction(id, action, watermark = { revision: 0, bitmap: '' }, ads, audioSetting, ticker) {
   if (!configured(id)) throw failure('Independent Program is not configured for this station');
   if (pending) throw failure('A Program action is pending');
   if (action === 'start') return child ? programStatus(id) : start(watermark, ads, ticker);
@@ -271,11 +404,20 @@ export async function programAction(id, action, watermark = { revision: 0, bitma
     return result;
   }
   if (status.state !== 'running' || !child) throw failure('Start Program first');
-  if (action === 'gain' && (!Number.isInteger(gainDb) || gainDb < -30 || gainDb > 0)) {
-    throw failure('Program gain must be between -30 and 0 dB', 400);
+  let command = action;
+  if (action === 'gain') {
+    if (!Number.isInteger(audioSetting) || audioSetting < -30 || audioSetting > 0) {
+      throw failure('Program gain must be between -30 and 0 dB', 400);
+    }
+    command = JSON.stringify({ gainDb: audioSetting });
+  } else if (action === 'input-audio') {
+    const setting = programInputAudioSchema.safeParse(audioSetting);
+    if (!setting.success) throw failure('Invalid Program input audio settings', 400);
+    if (setting.data.input === 'obs2' && !status.secondPort) throw failure('Second Program input is not configured');
+    command = JSON.stringify({ inputAudio: setting.data });
   }
   const result = waitFor(action);
-  child.stdin.write((action === 'gain' ? JSON.stringify({ gainDb }) : action) + '\n');
+  child.stdin.write(command + '\n');
   return result;
 }
 

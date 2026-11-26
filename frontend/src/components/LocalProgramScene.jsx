@@ -7,11 +7,19 @@ const style = 'rounded border border-zinc-600 bg-zinc-950 px-3 py-1.5 disabled:o
 const defaults = { video: '', image: '', x: 5, y: 5, w: 20, h: 20 };
 
 export function LocalProgramScene({ stationId, language, running, inputFrame, inputReady,
-  secondInputFrame, secondInputReady, secondInputConfigured }) {
+  secondInputFrame, secondInputReady, secondInputConfigured, canSchedule }) {
   const label = (en, ar) => language === 'ar' ? ar : en;
   const root = stationPath(stationId, '/program');
   const [draft, setDraft] = useState(defaults);
   const [scenes, setScenes] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [scheduleHeld, setScheduleHeld] = useState(false);
+  const [scheduledTime, setScheduledTime] = useState('');
+  const [reschedule, setReschedule] = useState(null);
+  const [repeatDaily, setRepeatDaily] = useState(false);
+  const [playlist, setPlaylist] = useState([]);
+  const [fillerSceneId, setFillerSceneId] = useState('');
+  const schedulePath = root + '/local-scene/schedule';
   const [assets, setAssets] = useState([]);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -40,6 +48,7 @@ export function LocalProgramScene({ stationId, language, running, inputFrame, in
     setWorkerPreview(null);
     setDraft(saved.data.find(scene => scene.id === draft.id) ?? saved.data[0] ?? defaults);
     setAssets(library.data.assets);
+    await refreshSchedule();
     setLoaded(true);
   }
   async function save() {
@@ -58,6 +67,11 @@ export function LocalProgramScene({ stationId, language, running, inputFrame, in
       setWorkerPreview(null);
       setMessage(label('Video ready. Select Take scene to put it on Program.', 'الفيديو جاهز. اضغط أخذ المشهد لعرضه على البث.'));
     });
+  }
+  async function refreshSchedule() {
+    const [events, hold] = await Promise.all([api(schedulePath),api(schedulePath+'-hold')]);
+    setEvents(events.data);
+    setScheduleHeld(hold.data.held);
   }
   return <details onToggle={event => { if (event.currentTarget.open && !loaded) void run(load); }}>
     <summary className="cursor-pointer py-2 font-semibold">{label('Program scenes', 'مشاهد Program')}</summary>
@@ -153,6 +167,112 @@ export function LocalProgramScene({ stationId, language, running, inputFrame, in
         })}>{label('Take scene','أخذ المشهد')}</button>
       </div>
     </fieldset>
+    {loaded && <div className="space-y-2">
+      <h3 className="text-sm font-semibold">{label('Program schedule', 'جدول بث Program')}</h3>
+      {scheduleHeld && <p role="status" className="text-sm text-amber-300">
+        {label('Schedule on hold. Due events are skipped.', 'الجدول متوقف مؤقتًا. تُتجاوز المواعيد التي يحين وقتها.')}
+      </p>}
+      {canSchedule && <button type="button" disabled={busy} className={style} onClick={() => run(async () => {
+        await api(schedulePath+'-hold',{method:'PUT',body:{held:!scheduleHeld}});
+        await refreshSchedule();
+      })}>{scheduleHeld ? label('Resume schedule', 'استئناف الجدول') : label('Hold schedule', 'إيقاف الجدول مؤقتًا')}</button>}
+      {canSchedule && <div className="flex flex-wrap items-end gap-2">
+        <label className="grid gap-1 text-sm">{label('Air time (device time)', 'موعد البث (توقيت الجهاز)')}
+          <input className={style} type="datetime-local" value={scheduledTime}
+            onChange={event => setScheduledTime(event.target.value)} />
+        </label>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={repeatDaily} onChange={event => setRepeatDaily(event.target.checked)} />
+          {label('Repeat every 24 hours', 'تكرار كل 24 ساعة')}
+        </label>
+        <button type="button" className={style}
+          disabled={busy || !scheduledTime || !scenes.some(scene => scene.id && scene.id === draft.id)}
+          onClick={() => run(async () => {
+            await api(schedulePath, {method:'POST',body:{sceneId:draft.id,dueAt:new Date(scheduledTime).getTime(),repeatDaily}});
+            await refreshSchedule();
+          })}>{label('Schedule saved scene', 'جدولة المشهد المحفوظ')}</button>
+      </div>}
+      {canSchedule && <div className="space-y-2">
+        <h4 className="text-sm font-semibold">{label('Scene sequence', 'قائمة المشاهد المتسلسلة')}</h4>
+        <p className="text-xs text-zinc-300">{label('Uses the air time above. Choose a filler scene to play after the final item.',
+          'تبدأ القائمة في الموعد أعلاه. يمكنك اختيار مشهد لملء الفراغ بعد العنصر الأخير.')}</p>
+        <label className="grid gap-1 text-sm">{label('Filler after the sequence', 'مشهد التعبئة بعد القائمة')}
+          <select className={style} value={fillerSceneId} onChange={event => setFillerSceneId(event.target.value)}>
+            <option value="">{label('Keep the final scene on air', 'إبقاء المشهد الأخير على الهواء')}</option>
+            {scenes.filter(scene=>scene.id && scene.type!=='network').map(scene=>
+              <option key={scene.id} value={scene.id}>{scene.name}</option>)}
+          </select>
+        </label>
+        <ol className="space-y-1">{playlist.map((entry, index) => <li key={entry.key} className="flex flex-wrap items-center gap-2 text-sm">
+          <span>{index+1}. {scenes.find(scene => scene.id === entry.sceneId)?.name}</span>
+          {(index < playlist.length-1 || fillerSceneId) && <label>{label('Seconds until next scene', 'الثواني حتى المشهد التالي')}{' '}
+            <input className={style+' w-24'} type="number" min={1} max={86400} value={entry.durationSeconds}
+              onChange={event => setPlaylist(items => items.map(item => item.key === entry.key
+                ? {...item,durationSeconds:event.target.valueAsNumber || ''} : item))} />
+          </label>}
+          <button type="button" className={style} onClick={() => setPlaylist(items => items.filter(item => item.key !== entry.key))}>
+            {label('Remove', 'إزالة')}</button>
+        </li>)}</ol>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={style} disabled={busy || playlist.length>=32 ||
+            !scenes.some(scene => scene.id && scene.id === draft.id)}
+            onClick={() => setPlaylist(items => [...items,{key:crypto.randomUUID(),sceneId:draft.id,durationSeconds:60}])}>
+            {label('Append selected scene', 'إضافة المشهد المحدد')}</button>
+          <button type="button" className={style} disabled={busy || !scheduledTime || playlist.length<2 ||
+            (fillerSceneId ? playlist : playlist.slice(0,-1)).some(item =>
+              !Number.isInteger(item.durationSeconds) || item.durationSeconds<1 || item.durationSeconds>86400)}
+            onClick={() => run(async () => {
+              await api(root+'/local-scene/schedule-list',{method:'POST',body:{dueAt:new Date(scheduledTime).getTime(),
+                fillerSceneId:fillerSceneId || undefined,
+                items:playlist.map(({sceneId,durationSeconds},index) => ({
+                  sceneId,durationSeconds:index===playlist.length-1 && !fillerSceneId ? 1 : durationSeconds
+                }))}});
+              setPlaylist([]);
+              await refreshSchedule();
+            })}>{label('Schedule sequence', 'جدولة القائمة')}</button>
+        </div>
+      </div>}
+      <button type="button" disabled={busy} className={style} onClick={() => run(refreshSchedule)}>
+        {label('Refresh schedule log', 'تحديث سجل الجدولة')}
+      </button>
+      {' '}<a className={style} href={'/api/v1'+schedulePath+'.csv'} download>
+        {label('Download schedule CSV', 'تنزيل سجل الجدولة CSV')}
+      </a>
+      <ul className="space-y-1 text-sm">{events.map(event => <li key={event.id} className="flex flex-wrap gap-2">
+        <span>{scenes.find(scene => scene.id === event.sceneId)?.name ?? event.sceneId}</span>
+        {Boolean(event.repeatDaily) && <span>{label('Repeats every 24 hours','يتكرر كل 24 ساعة')}</span>}
+        <span>{new Date(event.dueAt).toLocaleString()} · {({
+          pending: label('Pending','قيد الانتظار'), running: label('Taking','جارٍ الأخذ'),
+          aired: label('Take accepted','تم أخذ المشهد'), failed: label('Failed','تعذّر التنفيذ'),
+          skipped: label('Skipped','تم التجاوز')
+        })[event.state]}</span>
+        {event.executedAt && <span>{new Date(event.executedAt).toLocaleString()}</span>}
+        {event.error && <span className="text-amber-300">{event.error}</span>}
+        {canSchedule && event.state === 'pending' && <button type="button" disabled={busy} className={style}
+          onClick={() => setReschedule({id:event.id,previousDueAt:event.dueAt,time:''})}>
+          {label('Change time','تعديل الموعد')}</button>}
+        {reschedule?.id === event.id && event.state === 'pending' && canSchedule && <>
+          <label className="flex items-center gap-2">{label('New time (device time)','الموعد الجديد (توقيت الجهاز)')}
+            <input type="datetime-local" className={style} value={reschedule.time}
+              onChange={event=>setReschedule({...reschedule,time:event.target.value})} />
+          </label>
+          <button type="button" className={style} disabled={busy || !reschedule.time} onClick={() => run(async () => {
+            await api(schedulePath+'/'+reschedule.id,{method:'PATCH',body:{
+              dueAt:new Date(reschedule.time).getTime(),previousDueAt:reschedule.previousDueAt
+            }});
+            setReschedule(null);
+            await refreshSchedule();
+          })}>{label('Save time','حفظ الموعد')}</button>
+          <button type="button" className={style} disabled={busy} onClick={()=>setReschedule(null)}>
+            {label('Close editor','إغلاق التعديل')}</button>
+        </>}
+        {canSchedule && event.state === 'pending' && <button type="button" disabled={busy} className={style}
+          onClick={() => run(async () => {
+            await api(schedulePath + '/' + event.id,{method:'DELETE'});
+            await refreshSchedule();
+          })}>{label('Cancel','إلغاء')}</button>}
+      </li>)}</ul>
+    </div>}
     <p role="status" className="text-sm">{message}</p>
   </details>;
 }

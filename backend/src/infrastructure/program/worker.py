@@ -4,6 +4,7 @@ import base64
 import sys
 import struct
 import math
+from pathlib import Path
 from collections import deque
 from types import SimpleNamespace
 import threading
@@ -30,18 +31,23 @@ reported_program_audio = None
 program_gain_db = 0
 next_meter_update = 0
 recording_path = initial.get("recordingPath")
-srt_url = initial.get("srtUrl")
-srt_state = "connecting" if srt_url else "disabled"
-srt_graph = None
-srt_retry = 0
-srt_bytes = 0
-srt_progress = 0
+hls_path = Path(initial["hlsPath"]) if initial.get("hlsPath") else None
+hls = SimpleNamespace(graph=None, state="starting")
+hls_stop = threading.Event()
+hls_started = threading.Event()
+audio_monitor = initial.get("audioMonitor", True) and Gst.ElementFactory.find("lamemp3enc") is not None
+srt_destinations = [
+    SimpleNamespace(id=config["id"], url=config["url"], state="connecting",
+                    graph=None, retry=0, sent_bytes=0, progress=0)
+    for config in initial.get("srtDestinations", [])
+]
 srt_stop = threading.Event()
 recording_state = "starting" if recording_path else "disabled"
 recording_stop = threading.Event()
 width, height = initial["canvas"]["width"], initial["canvas"]["height"]
 video = f"video/x-raw,format=I420,width={width},height={height},framerate=25/1,pixel-aspect-ratio=1/1"
 audio = "audio/x-raw,format=S16LE,layout=interleaved,rate=48000,channels=2"
+input_audio_queue_buffers = 4  # Short queue to limit the delay behind the synchronized input video.
 pipeline = Gst.parse_launch(
     f"videotestsrc is-live=true pattern={slate} ! {video} ! v.sink_0 "
     f"intervideosrc channel=obs ! {video} ! v.sink_1 "
@@ -61,14 +67,24 @@ pipeline = Gst.parse_launch(
     "composed. ! queue ! x264enc tune=zerolatency speed-preset=veryfast "
     "bitrate=2500 key-int-max=25 bframes=0 ! h264parse config-interval=-1 ! queue ! mux. "
     f"appsrc name=local_audio is-live=true format=time max-bytes=7680 caps=\"{audio}\" ! clocksync ! "
-    f"volume name=program_volume ! {audio} ! "
+    f"volume name=program_volume ! {audio} ! tee name=program_sound "
+    "program_sound. ! "
     "audioconvert name=program_meter ! avenc_aac ! aacparse ! queue ! mux. "
     "mpegtsmux name=mux alignment=7 ! tee name=delivery "
     f"delivery. ! queue ! udpsink name=output host=127.0.0.1 port={out_port} sync=false async=false "
     + ("delivery. ! queue leaky=downstream max-size-buffers=64 max-size-time=0 max-size-bytes=0 ! "
        "appsink name=recording max-buffers=64 drop=true sync=false async=false " if recording_path else "")
-    + ("delivery. ! queue leaky=downstream max-size-buffers=32 ! "
-       "appsink name=srt_buffer max-buffers=32 drop=true sync=false async=false " if srt_url else "")
+    + "".join(
+        "delivery. ! queue leaky=downstream max-size-buffers=32 ! "
+        f"appsink name=srt_{destination.id} max-buffers=32 drop=true sync=false async=false "
+        for destination in srt_destinations
+    )
+    + ("delivery. ! queue leaky=downstream max-size-buffers=64 ! "
+       "appsink name=hls_buffer max-buffers=64 drop=true sync=false async=false " if hls_path else "")
+    + ("program_sound. ! queue leaky=downstream max-size-buffers=12 ! valve name=audio_monitor_gate drop=true ! "
+       "audioconvert ! audioresample ! audio/x-raw,rate=32000,channels=2 ! "
+       "lamemp3enc target=bitrate bitrate=96 cbr=true ! "
+       "appsink name=audio_monitor max-buffers=12 drop=true sync=false async=false " if audio_monitor else "")
 )
 loop = GLib.MainLoop()
 source = "fallback"
@@ -79,7 +95,9 @@ inputs = {
     name: SimpleNamespace(name=name, port=port, url=url, graph=None, retry=0, last={},
                           health="disconnected", healthy_since=None, black_since=None,
                           freeze_reference=None, freeze_since=None, silent_since=None,
-                          audio_level=None, reported_audio_level=None)
+                          audio_level=None, reported_audio_level=None,
+                          audio_mode="follow", gain_db=0, gain=1,
+                          pcm=deque(maxlen=input_audio_queue_buffers), tail=b"")
     for name, port, url in [("obs", in_port, input_url), ("obs2", second_port, None)]
     if port
 }
@@ -109,27 +127,66 @@ def record_program():
         recording_state = "failed"
 
 
-def stop_srt():
-    global srt_graph
-    if srt_graph:
-        srt_graph.set_state(Gst.State.NULL)
-        srt_graph = None
+def stop_srt(destination):
+    graph = destination.graph
+    destination.graph = None
+    if graph:
+        graph.set_state(Gst.State.NULL)
 
 
-def push_srt(_sink):
-    sample = _sink.emit("pull-sample")
-    graph = srt_graph
+def push_transport(sink, destination):
+    sample = sink.emit("pull-sample")
+    graph = destination.graph
     if sample and graph:
         graph.get_by_name("sender").emit("push-buffer", sample.get_buffer())
     return Gst.FlowReturn.OK
 
 
-def service_srt(now):
-    global srt_graph, srt_state, srt_retry, srt_bytes, srt_progress
-    if not srt_url:
-        return
-    if not srt_graph:
-        if now < srt_retry:
+def run_hls():
+    graph = None
+    try:
+        graph = Gst.parse_launch(
+            'appsrc name=sender is-live=true format=time max-buffers=64 leaky-type=downstream '
+            'caps="video/mpegts,systemstream=true,packetsize=188" ! tsdemux name=d latency=0 '
+            'd. ! video/x-h264 ! queue ! h264parse ! segments.video '
+            'd. ! audio/mpeg,mpegversion=4 ! queue ! aacparse ! segments.audio '
+            'hlssink2 name=segments playlist-length=5 max-files=7 target-duration=2 send-keyframe-requests=false'
+        )
+        segments = graph.get_by_name("segments")
+        playlist = hls_path / "index.m3u8"
+        segments.set_property("playlist-location", str(playlist))
+        segments.set_property("location", str(hls_path / "segment%05d.ts"))
+        if graph.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
+            raise RuntimeError("HLS startup failed")
+        hls.graph = graph
+        hls_started.set()
+        bus = graph.get_bus()
+        started_at = time.monotonic()
+        while not hls_stop.wait(0.25):
+            message = bus.pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.EOS)
+            if message:
+                description = message.parse_error()[0].message if message.type == Gst.MessageType.ERROR else "end of stream"
+                print(f"HLS packaging stopped: {description}", file=sys.stderr, flush=True)
+                hls.state = "failed"
+                break
+            if playlist.is_file() and time.time() - playlist.stat().st_mtime < 12:
+                hls.state = "ready"
+            elif time.monotonic() - started_at > 12:
+                hls.state = "failed"
+                break
+    except (GLib.Error, OSError, RuntimeError):
+        hls.state = "failed"
+    finally:
+        hls_started.set()
+        hls.graph = None
+        if graph:
+            graph.set_state(Gst.State.NULL)
+
+
+def service_srt(destination, now):
+    graph = destination.graph
+    if not graph:
+        if now < destination.retry:
             return
         try:
             graph = Gst.parse_launch(
@@ -137,55 +194,82 @@ def service_srt(now):
                 'caps="video/mpegts,systemstream=true,packetsize=188" ! '
                 'srtsink name=remote auto-reconnect=false wait-for-connection=true sync=false async=false'
             )
-            graph.get_by_name("remote").set_property("uri", srt_url)
+            graph.get_by_name("remote").set_property("uri", destination.url)
             if graph.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
-                graph.set_state(Gst.State.NULL)
                 raise RuntimeError("SRT startup failed")
-            srt_graph = graph
-            srt_state, srt_bytes, srt_progress = "connecting", 0, now
+            destination.graph = graph
+            destination.state = "connecting"
+            destination.sent_bytes = 0
+            destination.progress = now
         except (GLib.Error, RuntimeError):
-            srt_state, srt_retry = "retrying", now + 2
+            if graph:
+                graph.set_state(Gst.State.NULL)
+            destination.state, destination.retry = "retrying", now + 2
         return
-    stats = srt_graph.get_by_name("remote").get_property("stats")
+    stats = graph.get_by_name("remote").get_property("stats")
     sent = stats.get_value("bytes-sent-total") if stats and stats.has_field("bytes-sent-total") else 0
-    if sent > srt_bytes:
-        srt_state, srt_progress = "sending", now
-    srt_bytes = sent
-    error = srt_graph.get_bus().pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.EOS)
-    if error or now - srt_progress > 6:
-        stop_srt()
-        srt_state, srt_retry = "retrying", now + 2
+    if sent > destination.sent_bytes:
+        destination.state, destination.progress = "sending", now
+    destination.sent_bytes = sent
+    error = graph.get_bus().pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.EOS)
+    if error or now - destination.progress > 6:
+        destination.state, destination.retry = "retrying", now + 2
+        stop_srt(destination)
 
 
-def run_srt():
+def run_srt(destination):
     try:
         while not srt_stop.wait(0.08):
-            service_srt(time.monotonic())
+            service_srt(destination, time.monotonic())
     finally:
-        stop_srt()
+        stop_srt(destination)
 audio_sample = 0
 scene_audio = None
 silence = bytes(3840)
-contribution_audio = deque(maxlen=12)
 audio_lock = threading.Lock()
-contribution_tail = b""
+
+
+def audio_routed(feed):
+    return feed.health == "ready" and (
+        feed.audio_mode == "on" or (feed.audio_mode == "follow" and source == feed.name)
+    )
+
+
+def clear_audio(feed):
+    feed.pcm.clear()
+    feed.tail = b""
+
+
+def input_pcm(feed):
+    while len(feed.tail) < len(silence) and feed.pcm:
+        feed.tail += feed.pcm.popleft()
+    chunk = feed.tail[:len(silence)].ljust(len(silence), b"\x00")
+    feed.tail = feed.tail[len(silence):]
+    return chunk
+
+
+def mix_audio(tracks):
+    if not tracks:
+        return silence
+    if len(tracks) == 1 and tracks[0][1] == 1:
+        return tracks[0][0]
+    samples = [0.0] * (len(silence) // 2)
+    for chunk, gain in tracks:
+        for index, (value,) in enumerate(struct.iter_unpack("<h", chunk)):
+            samples[index] += value * gain
+    return struct.pack(f"<{len(samples)}h", *(max(-32768, min(32767, round(value))) for value in samples))
 
 
 def feed_local_audio(appsrc, _length):
-    global audio_sample, contribution_tail
-    active = scene_audio
-    chunk = silence
-    if source in inputs:
-        with audio_lock:
-            while len(contribution_tail) < len(silence) and contribution_audio:
-                contribution_tail += contribution_audio.popleft()
-            chunk = contribution_tail[:len(silence)].ljust(len(silence), b"\x00")
-            contribution_tail = contribution_tail[len(silence):]
-    elif active:
+    global audio_sample
+    with audio_lock:
+        active = scene_audio if source == "scene" else None
+        tracks = [(input_pcm(feed), feed.gain) for feed in inputs.values() if audio_routed(feed)]
+    if active:
         pcm, start = active
         index = ((audio_sample - start) * 4) % len(pcm)
-        chunk = pcm[index:index + len(silence)]
-    buffer = Gst.Buffer.new_wrapped(chunk)
+        tracks.append((pcm[index:index + len(silence)], 1))
+    buffer = Gst.Buffer.new_wrapped(mix_audio(tracks))
     buffer.pts = Gst.util_uint64_scale(audio_sample, Gst.SECOND, 48000)
     buffer.duration = 20 * Gst.MSECOND
     audio_sample += 960
@@ -240,13 +324,20 @@ def report(reply=None):
     status = dict(state="running" if last_packet else "starting", source=source, obs=inputs["obs"].health,
                   watermarkRevision=watermark_revision, adsRevision=ads_revision, visibleAds=visible_ads,
                   tickerRevision=ticker_revision,
-                  recording=recording_state, srt=srt_state, inputAudioDbfs=inputs["obs"].reported_audio_level,
+                  recording=recording_state,
+                  srtStates={destination.id: destination.state for destination in srt_destinations},
+                  inputAudioDbfs=inputs["obs"].reported_audio_level,
                   programAudioDbfs=reported_program_audio,
+                  audioMonitorAvailable=audio_monitor,
+                  inputAudioMix={name: {"mode": feed.audio_mode, "gainDb": feed.gain_db, "routed": audio_routed(feed)}
+                                 for name, feed in inputs.items()},
                   programGainDb=program_gain_db,
                   programMuted=pipeline.get_by_name("program_volume").get_property("mute"))
     if second_port:
         status["obs2"] = inputs["obs2"].health
         status["input2AudioDbfs"] = inputs["obs2"].reported_audio_level
+    if hls_path:
+        status["hls"] = hls.state
     if reply or status != previous:
         print(json.dumps(dict(status=status, reply=reply)), flush=True)
         previous = status
@@ -284,13 +375,14 @@ def set_fade(enabled):
 
 
 def select(name, fade=False):
-    global source, scene_audio, contribution_tail
+    global source, scene_audio
     set_fade(fade)
     element = pipeline.get_by_name("v")
     element.set_property("active-pad", element.get_static_pad({"obs": "sink_1", "obs2": "sink_2"}.get(name, "sink_0")))
     with audio_lock:
-        contribution_tail = b""
-        contribution_audio.clear()
+        for feed in inputs.values():
+            if feed.audio_mode == "follow" and feed.name in (source, name) and source != name:
+                clear_audio(feed)
         source = name
     if name != "scene":
         scene_audio = None
@@ -401,6 +493,23 @@ def command(line):
                 reply = "sceneUnavailable"
             print('{"sceneReceived":true}', flush=True)
             report(reply)
+        elif "audioMonitor" in packet:
+            if audio_monitor:
+                pipeline.get_by_name("audio_monitor_gate").set_property("drop", not packet["audioMonitor"])
+            return False
+        elif "inputAudio" in packet:
+            config = packet["inputAudio"]
+            feed = inputs.get(config["input"])
+            if feed:
+                with audio_lock:
+                    if feed.audio_mode != config["mode"]:
+                        clear_audio(feed)
+                    feed.audio_mode = config["mode"]
+                    feed.gain_db = config["gainDb"]
+                    feed.gain = 10 ** (feed.gain_db / 20)
+                report("applied")
+            else:
+                report("unavailable")
         elif "gainDb" in packet:
             program_gain_db = packet["gainDb"]
             pipeline.get_by_name("program_volume").set_property("volume", 10 ** (program_gain_db / 20))
@@ -450,20 +559,22 @@ def arrived(pad, info, kind, feed):
     if kind == "output":
         last_packet = now
     else:
-        if kind == "audio" and info.type & Gst.PadProbeType.BUFFER:
-            # Measure normalized stereo PCM against -60 dBFS RMS.
-            power = pcm_power(info.get_buffer())
-            with audio_lock:
-                if source == feed.name:
-                    buffer = info.get_buffer()
-                    contribution_audio.append(buffer.extract_dup(0, buffer.get_size()))
-            feed.audio_level = dbfs(power)
-            if power >= 32.768 ** 2:
-                feed.silent_since = None
-            elif feed.silent_since is None:
-                feed.silent_since = now
         feed.last[kind] = now
     return Gst.PadProbeReturn.OK
+
+
+def capture_input_audio(_sink, buffer, _pad, feed):
+    now = time.monotonic()
+    power = pcm_power(buffer)
+    with audio_lock:
+        if audio_routed(feed):
+            feed.pcm.append(buffer.extract_dup(0, buffer.get_size()))
+    feed.audio_level = dbfs(power)
+    if power >= 32.768 ** 2:
+        feed.silent_since = None
+    elif feed.silent_since is None:
+        feed.silent_since = now
+    feed.last["audio"] = now
 
 
 def watch(graph, element, kind, feed=None):
@@ -487,17 +598,17 @@ def open_input(feed):
         'tsdemux latency=80 name=d '
         f'd. ! video/x-h264 ! queue ! h264parse ! avdec_h264 ! videoconvert ! videoscale ! videorate ! {video} ! '
         'tee name=contribution '
-        f'contribution. ! queue ! intervideosink name=picture channel={feed.name} sync=false async=false '
+        f'contribution. ! queue ! intervideosink name=picture channel={feed.name} sync=true async=false '
         'contribution. ! queue leaky=downstream max-size-buffers=1 ! videorate drop-only=true ! videoscale ! '
         'video/x-raw,width=320,height=180,framerate=2/1 ! jpegenc ! '
         'appsink name=input_preview max-buffers=1 drop=true sync=false async=false '
         f'd. ! audio/mpeg,mpegversion=4 ! queue ! aacparse ! avdec_aac ! audioconvert ! audioresample ! {audio} ! '
-        'fakesink name=sound sync=false async=false'
+        'fakesink name=sound signal-handoffs=true sync=true async=false'
     )
     if feed.url:
         graph.get_by_name("url_input").set_property("location", feed.url)
     watch(graph, "picture", "video", feed)
-    watch(graph, "sound", "audio", feed)
+    graph.get_by_name("sound").connect("handoff", capture_input_audio, feed)
     graph.set_state(Gst.State.PLAYING)
     return graph
 
@@ -536,6 +647,7 @@ def take_backup(feed, now):
 
 
 def service_input(feed, now, meter_due):
+    was_ready = feed.health == "ready"
     if feed.graph is None and now >= feed.retry:
         try:
             feed.graph = open_input(feed)
@@ -585,6 +697,9 @@ def service_input(feed, now, meter_due):
             if feed.healthy_since is None:
                 feed.healthy_since = now
             feed.health = "ready" if now - feed.healthy_since >= 5 else "warming"
+    if was_ready and feed.health != "ready":
+        with audio_lock:
+            clear_audio(feed)
 
 
 def tick():
@@ -597,6 +712,18 @@ def tick():
         next_meter_update = now + 0.5
     emit_preview(pipeline, "preview", "preview")
     emit_preview(pipeline, "program_monitor", "programMonitor")
+    if audio_monitor:
+        sink = pipeline.get_by_name("audio_monitor")
+        chunks = []
+        for _ in range(12):
+            sample = sink.emit("try-pull-sample", 0)
+            if not sample:
+                break
+            buf = sample.get_buffer()
+            chunks.append(buf.extract_dup(0, buf.get_size()))
+        if chunks:
+            data = base64.b64encode(b"".join(chunks)).decode("ascii")
+            print(json.dumps({"programAudio": data}), flush=True)
     error = pipeline.get_bus().pop_filtered(Gst.MessageType.ERROR)
     if error or now - (last_packet or started) > 8:
         print(error.parse_error() if error else "Program mux stopped producing packets", file=sys.stderr)
@@ -615,10 +742,14 @@ watch(pipeline, "output", "output")
 pipeline.get_by_name("program_meter").get_static_pad("sink").add_probe(
     Gst.PadProbeType.BUFFER, measure_program_audio)
 pipeline.get_by_name("local_audio").connect("need-data", feed_local_audio)
-if srt_url:
-    sink = pipeline.get_by_name("srt_buffer")
+for destination in srt_destinations:
+    sink = pipeline.get_by_name(f"srt_{destination.id}")
     sink.set_property("emit-signals", True)
-    sink.connect("new-sample", push_srt)
+    sink.connect("new-sample", push_transport, destination)
+if hls_path:
+    sink = pipeline.get_by_name("hls_buffer")
+    sink.set_property("emit-signals", True)
+    sink.connect("new-sample", push_transport, hls)
 fade_image = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 1, 1)
 fade_image.fill(0x000000ff)
 fade_layer = pipeline.get_by_name("scene_fade")
@@ -629,11 +760,17 @@ select("fallback")
 apply_watermark(initial)
 if initial.get("ticker"):
     apply_ticker(initial["ticker"])
+hls_thread = None
+if hls_path:
+    hls_thread = threading.Thread(target=run_hls, daemon=True)
+    hls_thread.start()
+    hls_started.wait(1)
 pipeline.set_state(Gst.State.PLAYING)
-srt_thread = None
-if srt_url:
-    srt_thread = threading.Thread(target=run_srt, daemon=True)
-    srt_thread.start()
+srt_threads = []
+for destination in srt_destinations:
+    thread = threading.Thread(target=run_srt, args=(destination,), daemon=True)
+    thread.start()
+    srt_threads.append(thread)
 recorder = None
 if recording_path:
     recorder = threading.Thread(target=record_program, daemon=True)
@@ -644,9 +781,12 @@ threading.Thread(target=read_commands, daemon=True).start()
 try:
     loop.run()
 finally:
-    if srt_thread:
-        srt_stop.set()
-        srt_thread.join(timeout=1)
+    if hls_thread:
+        hls_stop.set()
+        hls_thread.join(timeout=1)
+    srt_stop.set()
+    for thread in srt_threads:
+        thread.join(timeout=1)
     if recorder:
         recording_stop.set()
         recorder.join(timeout=1)

@@ -30,7 +30,7 @@ const { createSession } = await import('../src/infrastructure/security/session-s
 const { getSqliteDatabase } = await import('../src/infrastructure/database/sqlite.js');
 const station = await repo.getStationRepository().create({name:'Restart fixture',organizationId:'fixture',encryptedPassword:'unused'});
 const user = await repo.getUserRepository().create({email:'restart@fixture.local',fullName:'Operator',passwordHash:'unused',
-  role:'OPERATOR',organizationId:'fixture'});
+  role:'STUDIO_MANAGER',organizationId:'fixture'});
 const token = CryptoService.signAccessToken({sub:user.id,sid:createSession(user.id).id});
 process.env.MCR_PROGRAM_STATION_ID = station.id;
 const base = 'http://127.0.0.1:25600';
@@ -137,7 +137,48 @@ try {
   console.log('Program runtime auto-start receiver passed');
   sender=contribution();
   await waitFor(async()=> (await call())[networkAction]==='ready');
-  assert.equal((await call(networkAction)).source, networkAction);
+  const scheduledScene = { id:crypto.randomUUID(),name:'=شبكة "أ", مجدولة',type:'network',input:secondaryFixture ? 'secondary' : 'primary' };
+  async function scheduleRequest(suffix, method, body) {
+    const response = await fetch(base+path+'/local-scene'+suffix, {method,
+      headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+      body:body ? JSON.stringify(body) : undefined});
+    assert(response.ok, await response.clone().text());
+    return (await response.json()).data;
+  }
+  await scheduleRequest('', 'PUT', scheduledScene);
+  const dueAt = Date.now()+2500;
+  const event = await scheduleRequest('/schedule','POST',{sceneId:scheduledScene.id,dueAt,repeatDaily:true});
+  assert.equal(redFrames,0);
+  await stop(web);
+  web=null;
+  await waitFor(()=>redFrames>10);
+  web=launch('backend/src/index.js');
+  await waitFor(()=>fetch(base+'/health').then(r=>r.ok).catch(()=>false));
+  const jobs = await scheduleRequest('/schedule','GET');
+  const result = jobs.find(job=>job.id===event.id);
+  assert.equal(result.state,'aired');
+  assert(result.executedAt>=dueAt && result.executedAt<dueAt+2500);
+  console.log('Scheduled Program scene receiver passed');
+  const next = jobs.find(job=>job.sceneId===scheduledScene.id && job.state==='pending');
+  assert.equal(next?.dueAt,dueAt+86400000);
+  assert.equal(next.repeatDaily,1);
+  const occupied=next.dueAt+7000;
+  const blocker=await scheduleRequest('/schedule','POST',{sceneId:scheduledScene.id,dueAt:occupied});
+  const conflictResponse=await fetch(base+path+'/local-scene/schedule/'+next.id,{method:'PATCH',
+    headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+    body:JSON.stringify({dueAt:occupied,previousDueAt:next.dueAt})});
+  assert.equal(conflictResponse.status,409);
+  assert.equal((await scheduleRequest('/schedule','GET')).find(job=>job.id===next.id).dueAt,next.dueAt);
+  await scheduleRequest('/schedule/'+blocker.id,'DELETE');
+  await scheduleRequest('/schedule/'+next.id,'PATCH',{dueAt:occupied,previousDueAt:next.dueAt});
+  const moved=(await scheduleRequest('/schedule','GET')).find(job=>job.id===next.id);
+  assert.equal(moved.dueAt,occupied);
+  assert.equal(moved.repeatDaily,1);
+  console.log('Pending Program reschedule and conflict passed');
+  await scheduleRequest('/schedule/'+next.id,'DELETE');
+  assert(!(await scheduleRequest('/schedule','GET')).some(job=>job.id===next.id));
+  console.log('Daily Program recurrence and cancellation passed');
+  await call(networkAction);
   await waitFor(()=>redFrames>10);
   await stop(runtime);
   await stop(sender);
@@ -171,6 +212,50 @@ try {
   const overlay=await sceneRequest('/ads/assets?name=restore-overlay','POST',image,'image/png');
   const localScene={id:crypto.randomUUID(),name:'Restore scene',video:video.id,image:overlay.id,x:5,y:5,w:10,h:10};
   await sceneRequest('/local-scene','PUT',localScene);
+  assert.equal((await scheduleRequest('/schedule-hold','PUT',{held:true})).held,true);
+  const heldEvent=await scheduleRequest('/schedule','POST',{sceneId:localScene.id,dueAt:Date.now()+700});
+  const yellowBeforeHold=yellowFrames;
+  await waitFor(async()=> (await scheduleRequest('/schedule','GET')).some(job=>job.id===heldEvent.id && job.state==='skipped'));
+  assert.equal((await call()).source,networkAction);
+  assert.equal(yellowFrames,yellowBeforeHold);
+  assert.equal((await scheduleRequest('/schedule-hold','PUT',{held:false})).held,false);
+  assert.equal((await scheduleRequest('/schedule-hold','GET')).held,false);
+  const sequenceAt=Date.now()+2500;
+  const items=[{sceneId:localScene.id,durationSeconds:3},{sceneId:scheduledScene.id,durationSeconds:3}];
+  const sequence=await sceneRequest('/local-scene/schedule-list','POST',{dueAt:sequenceAt,items,fillerSceneId:localScene.id});
+  const conflict=await fetch(base+path+'/local-scene/schedule-list',{method:'POST',
+    headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+    body:JSON.stringify({dueAt:sequenceAt-1000,items:[{...items[0],durationSeconds:1},items[1]]})});
+  assert.equal(conflict.status,409);
+  assert(!(await scheduleRequest('/schedule','GET')).some(job=>job.dueAt===sequenceAt-1000));
+  const priorYellow=yellowFrames;
+  await waitFor(()=>yellowFrames>priorYellow+5);
+  const priorRed=redFrames;
+  await waitFor(()=>redFrames>priorRed+5);
+  const beforeFiller=yellowFrames;
+  await waitFor(()=>yellowFrames>beforeFiller+10);
+
+  const completed=(await scheduleRequest('/schedule','GET')).filter(job=>sequence.ids.includes(job.id))
+    .sort((a,b)=>a.dueAt-b.dueAt);
+  assert.deepEqual(completed.map(job=>job.state),['aired','aired','aired']);
+  assert.equal(completed[1].dueAt-completed[0].dueAt,3000);
+  assert.equal(completed[2].dueAt,sequenceAt+6000);
+  assert.equal(completed[2].sceneId,localScene.id);
+  assert.equal((await call()).source,'scene');
+  console.log('Program filler receiver passed');
+  console.log('Schedule hold and resume receiver passed');
+  const csvUrl = base+path+'/local-scene/schedule.csv';
+  assert.equal((await fetch(csvUrl)).status,401);
+  const exported = await fetch(csvUrl,{headers:{Authorization:'Bearer '+token}});
+  assert.equal(exported.status,200);
+  assert.match(exported.headers.get('content-disposition'),/attachment;.*program-schedule\.csv/);
+  const csv = await exported.text();
+  assert(csv.includes('"' + "'" + scheduledScene.name.replaceAll('"','""') + '"'));
+  assert(csv.includes(new Date(dueAt).toISOString()));
+  assert(csv.split('\r\n').some(line=>line.includes(heldEvent.id) && line.includes('"skipped"')));
+  assert(csv.split('\r\n').some(line=>line.includes(event.id) && line.includes('"take_accepted"')));
+  console.log('Program schedule CSV export passed');
+  console.log('Scene sequence receiver and atomic conflict passed');
   assert.equal((await sceneRequest('/local-scene/take','POST',localScene)).source,'scene');
   await waitFor(()=>yellowFrames>10);
   const localSession=(await call()).session;

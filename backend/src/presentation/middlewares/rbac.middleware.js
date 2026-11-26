@@ -1,5 +1,10 @@
 import { ROLES, ROLE_PERMISSIONS } from '@mcr/shared';
 
+export function hasPermission(role, permission) {
+  const permissions = ROLE_PERMISSIONS[role] || [];
+  return role === ROLES.SUPER_ADMIN || permissions.includes('*') || permissions.includes(permission);
+}
+
 export function authorize(requiredPermission) {
   return (req, res, next) => {
     if (!req.user) {
@@ -8,14 +13,7 @@ export function authorize(requiredPermission) {
 
     const userRole = req.user.role;
 
-    // Super Admin has unrestricted access to everything
-    if (userRole === ROLES.SUPER_ADMIN) {
-      return next();
-    }
-
-    const userPermissions = ROLE_PERMISSIONS[userRole] || [];
-
-    if (userPermissions.includes('*') || userPermissions.includes(requiredPermission)) {
+    if (hasPermission(userRole, requiredPermission)) {
       return next();
     }
 
