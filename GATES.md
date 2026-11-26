@@ -216,3 +216,49 @@ SC29 direct execution passed: the receiver decoded slate on restart, then decode
   EVIDENCE: pending
 
 SC30 passed by direct execution. The receiver decoded restored local picture and audio, and decoded silent slate when the first frame was absent. The API reported unavailable. Formal runner evidence remains pending.
+
+- [ ] IPTV01: The opt-in Linux deployment configuration renders with placeholder settings.
+  CHECK: docker compose --env-file deploy.env -f backend/infrastructure/docker/docker-compose.yml -f backend/infrastructure/docker/docker-compose.iptv.yml config --quiet
+  EXPECT: ^$
+  EVIDENCE: pending
+
+- [ ] IPTV02: A Linux deployment delivers decodable HLS audio and video and removes the live playlist when Program stops.
+  EVIDENCE: pending Linux Docker host and authorized staging verification
+
+IPTV local checks passed: both application builds, 27 repository tests using isolated SQLite, POSIX shell syntax, and static YAML wiring for the internal UDP socket, shared HLS volume and SQLite mount. IPTV01 still requires Docker Compose to render the merged configuration. IPTV02 requires the Linux stack and an independent receiver.
+
+- [ ] UI01: The relocated controls compile and work from their station-scoped pages.
+  CHECK: npm run build:web
+  EXPECT: built in
+  EVIDENCE: pending
+
+- [ ] TICKER01: A separate UDP receiver verifies the ticker moves over encoded Program and clears when disabled.
+  CHECK: node backend/verification/ticker-loopback.js
+  EXPECT: Ticker motion and disable verified on decoded Program
+  EVIDENCE: pending isolated receiver verification
+
+UI01 and TICKER01 passed direct execution. The web build completed and the local browser displayed the relocated controls. An isolated SQLite runtime and separate FFmpeg receiver confirmed motion, removal and a stable Program session. Formal runner evidence remains pending.
+
+- [ ] SCENEUPLOAD01: Sources & Scenes uploads a large MP4 and selects it as the draft video.
+  CHECK: npm run build:web
+  EXPECT: built in
+  EVIDENCE: pending build and browser verification
+
+- [ ] SCENEUPLOAD02: An isolated media receiver decodes an uploaded video-only scene from Program.
+  CHECK: node backend/verification/scene-upload-loopback.js
+  EXPECT: Large MP4 uploaded and video-only scene decoded
+  EVIDENCE: pending isolated receiver verification
+
+SCENEUPLOAD01 and SCENEUPLOAD02 passed direct verification. The web build passed, the browser rendered the upload control, and the loopback receiver decoded Program after upload of the supplied 93,904,507-byte MP4. Formal runner evidence remains pending.
+
+- [ ] VIDEOINPUT01: Live Control builds with an independent video input and monitor.
+  CHECK: npm run build:web
+  EXPECT: built in
+  EVIDENCE: pending browser and build verification
+
+- [ ] VIDEOINPUT02: An isolated receiver decodes a direct Take from the video input in the original Program session.
+  CHECK: node backend/verification/scene-upload-loopback.js
+  EXPECT: Large MP4 uploaded and video-only scene decoded
+  EVIDENCE: pending loopback verification
+
+VIDEOINPUT01 and VIDEOINPUT02 passed direct verification. The local browser loaded a different clip in muted preview while Program remained on the existing scene. The isolated receiver decoded the direct take without a session change. Formal runner evidence remains pending.

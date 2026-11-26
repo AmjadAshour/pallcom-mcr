@@ -11,3 +11,8 @@ graphify-out
 **/*.db-*
 **/*.sqlite
 **/*.sqlite-*
+**/deploy.env
+**/*.pem
+**/*.key
+**/*.pfx
+**/*.p12
