@@ -3,6 +3,10 @@ import { useOutletContext } from 'react-router-dom';
 import { api, stationPath } from '../context/api.js';
 import { OverlayCanvas } from '../components/BroadcastOverlay.jsx';
 import { useMcrStore } from '../context/useMcrStore.js';
+import { useProgramStatus } from '../context/useProgramStatus.js';
+import { ProgramAds } from '../components/ProgramAds.jsx';
+import { ProgramWatermark } from '../components/ProgramWatermark.jsx';
+import { ProgramTicker } from '../components/ProgramTicker.jsx';
 
 const kinds = ['ad', 'logo', 'ticker'];
 const labels = {
@@ -264,6 +268,17 @@ function StationGraphics({ stationId, t }) {
   </>;
 }
 
+function IndependentGraphics({ stationId, language }) {
+  const status = useProgramStatus(stationId);
+  if (!status?.configured) return null;
+  return <section className="space-y-3">
+    <h2 className="text-base font-semibold">{language === 'ar' ? 'جرافيكس البرنامج المستقل' : 'Independent Program graphics'}</h2>
+    <ProgramAds stationId={stationId} language={language} status={status} />
+    <ProgramWatermark stationId={stationId} language={language} status={status} />
+    <ProgramTicker stationId={stationId} language={language} status={status} />
+  </section>;
+}
+
 export function GraphicsPage() {
   const { language, stations, selectedStationId, selectStation } = useMcrStore();
   const { permissions } = useOutletContext();
@@ -285,8 +300,12 @@ export function GraphicsPage() {
       {!canControl && <p className="text-zinc-400">{t.access}</p>}
       {canControl && !station && <p className="text-zinc-400">{t.noStation}</p>}
       {canControl && station && <>
-        <StationGraphics key={station.id} stationId={station.id} t={t} />
-        <ObsTextSources key={station.id + ':' + station.currentProgramScene} station={station} language={language} />
+        <IndependentGraphics key={station.id} stationId={station.id} language={language} />
+        <details className="space-y-3 rounded-lg border border-zinc-700 p-4">
+          <summary className="cursor-pointer font-semibold">{language === 'ar' ? 'جرافيكس OBS' : 'OBS graphics'}</summary>
+          <StationGraphics key={station.id} stationId={station.id} t={t} />
+          <ObsTextSources key={station.id + ':' + station.currentProgramScene} station={station} language={language} />
+        </details>
       </>}
     </section>
   );

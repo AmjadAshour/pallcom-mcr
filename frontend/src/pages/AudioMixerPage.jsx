@@ -1,6 +1,7 @@
 import React from 'react';
 import { useOutletContext } from 'react-router-dom';
 import { useMcrStore } from '../context/useMcrStore.js';
+import { ProgramAudioControls } from '../components/ProgramAudioControls.jsx';
 import { translations } from '../i18n/translations.js';
 import { Card, CardHeader, CardTitle, CardContent, Button, AudioMeter } from '@mcr/ui';
 import { Volume2, VolumeX, Mic, Music, Radio } from 'lucide-react';
@@ -13,8 +14,8 @@ export function AudioMixerPage() {
   const currentStation = stations.find((s) => s.id === selectedStationId) || stations[0];
 
   if (!currentStation) return null;
-  const disabled = !currentStation.ready || Boolean(pending[currentStation.id]) ||
-    !(permissions.includes('*') || permissions.includes('station:control'));
+  const canControl = permissions.includes('*') || permissions.includes('station:control');
+  const disabled = !currentStation.ready || Boolean(pending[currentStation.id]) || !canControl;
 
   return (
     <div className="space-y-4">
@@ -43,6 +44,7 @@ export function AudioMixerPage() {
         </select>
       </div>
 
+      <ProgramAudioControls key={currentStation.id} stationId={currentStation.id} language={language} canControl={canControl} />
       {/* Multitrack Mixing Console Strips */}
       <div className="flex gap-4 overflow-x-auto pb-4 pt-2">
         {currentStation.audioInputs.map((input) => {

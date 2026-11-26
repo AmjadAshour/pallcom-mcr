@@ -1,12 +1,31 @@
 import React, { useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
 import { useMcrStore } from '../context/useMcrStore.js';
+import { stationPath } from '../context/api.js';
+import { useProgramStatus } from '../context/useProgramStatus.js';
+import { useMonitorFrame } from '../context/useProgramMonitor.js';
+import { LocalProgramScene } from '../components/LocalProgramScene.jsx';
 import { translations } from '../i18n/translations.js';
 import { Card, CardHeader, CardTitle, CardContent } from '@mcr/ui';
 import { Layers, Eye, EyeOff, Video } from 'lucide-react';
 
+function IndependentScenes({ stationId, language }) {
+  const status = useProgramStatus(stationId);
+  const running = status?.state === 'running';
+  const path = stationPath(stationId, '/program/input-preview');
+  const inputFrame = useMonitorFrame(path, running, 2000);
+  const secondInputFrame = useMonitorFrame(path + '?input=secondary', running && Boolean(status.secondPort), 2000);
+  if (!status?.configured) return null;
+  return <LocalProgramScene stationId={stationId} language={language} running={running}
+    inputFrame={inputFrame} inputReady={status.obs === 'ready'} secondInputFrame={secondInputFrame}
+    secondInputReady={status.obs2 === 'ready'} secondInputConfigured={Boolean(status.secondPort)} />;
+}
+
 export function SourcesScenesPage() {
   const { language, stations, selectedStationId, selectStation } = useMcrStore();
   const t = translations[language] || translations.en;
+  const { permissions } = useOutletContext();
+  const canControl = permissions.includes('*') || permissions.includes('station:control');
 
   const currentStation = stations.find((s) => s.id === selectedStationId) || stations[0];
   const [activeSceneName, setActiveSceneName] = useState(
@@ -47,6 +66,7 @@ export function SourcesScenesPage() {
         </select>
       </div>
 
+      {canControl && <IndependentScenes key={currentStation.id} stationId={currentStation.id} language={language} />}
       {/* Two Column Layout: Scenes List & Sources Inspector */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
         {/* Scenes List Column */}

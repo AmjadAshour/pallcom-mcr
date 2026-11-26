@@ -8,6 +8,8 @@ import { TallyIndicator } from '@mcr/ui';
 import { ProgramPreview } from '../components/ProgramPreview.jsx';
 import { useMcrStore } from '../context/useMcrStore.js';
 import { api, stationPath } from '../context/api.js';
+import { useMonitorFrame } from '../context/useProgramMonitor.js';
+import { useProgramStatus } from '../context/useProgramStatus.js';
 
 const grids = {
   2: 'grid-cols-1 sm:grid-cols-2',
@@ -15,6 +17,13 @@ const grids = {
   4: 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4'
 };
 const button = 'rounded border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-800 focus-visible:outline focus-visible:outline-cyan-400';
+const programLabels = {
+  running: ['Running', 'قيد التشغيل'],
+  stopped: ['Stopped', 'متوقف'],
+  starting: ['Starting', 'جارٍ التشغيل'],
+  stopping: ['Stopping', 'جارٍ الإيقاف'],
+  failed: ['Worker failed', 'تعطل محرك البث']
+};
 
 function readLayout(key) {
   try {
@@ -34,7 +43,15 @@ function StationTile({ station, preview, ar, canControl }) {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const online = station.status === 'ONLINE';
-  const onAir = online && station.streamStatus === 'STREAMING';
+  const programPath = stationPath(station.id, '/program');
+  const program = useProgramStatus(station.id, true, 5000);
+  const programRunning = program?.state === 'running';
+  const showIndependent = programRunning || (program?.configured && !online);
+  const programFrame = useMonitorFrame(programPath + (preview ? '/input-preview' : '/program-monitor'), programRunning, 2000);
+  const monitorTitle = preview
+    ? (ar ? 'معاينة مدخل البرنامج المستقل' : 'Independent Program input preview')
+    : (ar ? 'صورة خرج البرنامج المستقل' : 'Independent Program output');
+  const onAir = showIndependent ? programRunning : online && station.streamStatus === 'STREAMING';
   const scene = preview ? station.currentPreviewScene : station.currentProgramScene;
   const fps = online && Number.isFinite(station.fps) ? station.fps.toFixed(1) + ' FPS' : '—';
   const bitrate = online && Number.isFinite(station.streamBitrateKbps) ? station.streamBitrateKbps.toLocaleString() + ' kb/s' : '— kb/s';
@@ -60,17 +77,22 @@ function StationTile({ station, preview, ar, canControl }) {
           aria-label={(ar ? 'ترتيب ' : 'Reorder ') + station.name}><GripVertical size={15} /></button>
         <TallyIndicator state={onAir ? 'program' : 'idle'} pulse={onAir} size="sm" />
         <strong className="min-w-0 flex-1 truncate">{station.name}</strong>
-        <span className="font-mono text-zinc-400" title={ar ? 'معدل بث OBS الفعلي' : 'Measured OBS stream bitrate'}>
+        {!showIndependent && <><span className="font-mono text-zinc-400" title={ar ? 'معدل بث OBS الفعلي' : 'Measured OBS stream bitrate'}>
           {online && station.streamReconnecting ? (ar ? 'إعادة الاتصال' : 'Reconnecting') : bitrate}
         </span>
-        <span className="font-mono text-zinc-400">{fps}</span>
+        <span className="font-mono text-zinc-400">{fps}</span></>}
       </header>
       <div className="grid aspect-video place-items-center overflow-hidden bg-zinc-950">
-        <ProgramPreview key={JSON.stringify([preview, station.status, station.ready])} station={station} preview={preview} />
+        {showIndependent
+          ? (programFrame ? <img className="h-full w-full object-contain" src={programFrame} alt={monitorTitle} />
+            : <span className="text-xs text-zinc-400">{ar ? 'صورة البرنامج غير متاحة' : 'Program picture unavailable'}</span>)
+          : <ProgramPreview key={JSON.stringify([preview, station.status, station.ready])} station={station} preview={preview} />}
       </div>
       <footer className="flex items-center justify-between gap-2 border-t border-zinc-800 px-3 py-2 text-xs">
-        <span className="truncate text-zinc-300">{scene || '—'}</span>
-        <span className={online ? 'text-emerald-400' : station.status === 'DEGRADED' ? 'text-amber-400' : 'text-zinc-400'}>{station.status}</span>
+        <span className="truncate text-zinc-300">{showIndependent ? (ar ? 'البرنامج المستقل' : 'Independent Program') : scene || '—'}</span>
+        {showIndependent
+          ? <span className={programRunning ? 'text-emerald-400' : 'text-zinc-400'}>{programLabels[program.state]?.[ar ? 1 : 0]}</span>
+          : <span className={online ? 'text-emerald-400' : station.status === 'DEGRADED' ? 'text-amber-400' : 'text-zinc-400'}>{station.status}</span>}
       </footer>
       {!!audio.length && <div className="max-h-28 space-y-1 overflow-auto bg-zinc-950 px-3 py-2">
         {audio.map((input) => {
@@ -151,7 +173,7 @@ function MonitorWall({ storageKey, stations, ar, canControl }) {
           </button>}
         </div>
       </header>
-      <p className="text-xs text-zinc-400">{ar ? 'لقطات دورية من OBS. ترتيب المحطات محفوظ في هذا المتصفح.' : 'Periodic OBS snapshots. Station order is saved in this browser.'}</p>
+      <p className="text-xs text-zinc-400">{ar ? 'لقطات دورية من البرنامج المستقل أو OBS. ترتيب المحطات محفوظ في هذا المتصفح.' : 'Periodic snapshots from Independent Program or OBS. Station order is saved in this browser.'}</p>
       {notice && <p role="status" className="text-xs text-amber-400">{notice}</p>}
       {!order.length && <p className="py-10 text-center text-sm text-zinc-400">{ar ? 'أضف محطة لبدء المراقبة' : 'Add a station to start monitoring'}</p>}
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }) => {
