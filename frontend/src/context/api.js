@@ -11,8 +11,13 @@ async function request(path, options) {
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || result.success !== true) {
+    const retryAfter = response.headers.get('Retry-After') ?? response.headers.get('RateLimit-Reset');
+    const seconds = Number(retryAfter);
+    const retryAfterMs = retryAfter && Number.isFinite(seconds)
+      ? Math.max(1000, seconds * 1000)
+      : 60000;
     throw Object.assign(new Error(result.error || `Server request failed (${response.status})`), {
-      status: response.status, details: result.details
+      status: response.status, details: result.details, retryAfterMs
     });
   }
   return result;

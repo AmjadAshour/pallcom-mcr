@@ -19,14 +19,14 @@ export const useMcrStore = create((set, get) => {
   let stationListVersion = 0;
   const commandVersions = new Map();
 
-  async function synchronize() {
+  async function synchronize(signal) {
     if (synchronizing) return;
     synchronizing = true;
     const version = sessionVersion;
     const listVersion = stationListVersion;
     try {
-      const { data } = await api('/stations');
-      if (version !== sessionVersion || listVersion !== stationListVersion) return;
+      const { data } = await api('/stations', { signal });
+      if (signal?.aborted || version !== sessionVersion || listVersion !== stationListVersion) return;
       const previous = get().stations;
       const currentId = get().selectedStationId;
       const selectedStationId = data.some((station) => station.id === currentId) ? currentId : data[0]?.id;
@@ -40,16 +40,17 @@ export const useMcrStore = create((set, get) => {
           : station;
       });
       set({ stations, selectedStationId, connectionError: '' });
-      await Promise.all(stations.filter((station) => station.status === 'ONLINE').map(async (station) => {
+      const delays = await Promise.all(stations.filter((station) => station.status === 'ONLINE').map(async (station) => {
         const commandVersion = commandVersions.get(station.id);
         try {
-          const { data: snapshot } = await api(stationPath(station.id, '/snapshot'));
-          if (version !== sessionVersion || commandVersion !== commandVersions.get(station.id) || get().pending[station.id]) return;
+          const { data: snapshot } = await api(stationPath(station.id, '/snapshot'), { signal });
+          if (signal?.aborted || version !== sessionVersion || commandVersion !== commandVersions.get(station.id) || get().pending[station.id]) return;
           set((state) => ({
             stations: state.stations.map((item) => item.id === station.id ? { ...item, ...snapshot, ready: true } : item)
           }));
-        } catch {
-          if (version !== sessionVersion || commandVersion !== commandVersions.get(station.id) || get().pending[station.id]) return;
+        } catch (error) {
+          if (signal?.aborted || version !== sessionVersion || commandVersion !== commandVersions.get(station.id) || get().pending[station.id]) return;
+          if (error.status === 429) return error.retryAfterMs;
           set((state) => ({
             stations: state.stations.map((item) => item.id === station.id
               ? { ...item, ready: false, streamStatus: 'UNKNOWN', recordStatus: 'UNKNOWN' }
@@ -57,8 +58,10 @@ export const useMcrStore = create((set, get) => {
           }));
         }
       }));
+      return Math.max(5000, ...delays.map((delay) => delay ?? 0));
     } catch (error) {
-      if (version !== sessionVersion) return;
+      if (signal?.aborted || version !== sessionVersion) return;
+      if (error.status === 429) return Math.max(5000, error.retryAfterMs);
       set({
         connectionError: error.message,
         stations: get().stations.map((station) => ({ ...station, ready: false, streamStatus: 'UNKNOWN', recordStatus: 'UNKNOWN' }))
