@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../../context/api.js';
+import { pollWhileVisible } from '../../context/pollWhileVisible.js';
 import { useMcrStore } from '../../context/useMcrStore.js';
 
 export function SessionGate({ children }) {
@@ -11,19 +12,28 @@ export function SessionGate({ children }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    api('/auth/me', { signal: controller.signal }).then(({ user }) => setUser(user)).catch((failure) => {
-      if (controller.signal.aborted) return;
-      if (failure.status !== 401) setError(failure.message);
-      setUser(null);
-    });
-    return () => controller.abort();
+    let timer;
+    async function loadSession() {
+      try {
+        const { user } = await api('/auth/me', { signal: controller.signal });
+        if (!controller.signal.aborted) setUser(user);
+      } catch (failure) {
+        if (controller.signal.aborted) return;
+        if (failure.status === 429) {
+          timer = setTimeout(loadSession, failure.retryAfterMs);
+          return;
+        }
+        if (failure.status !== 401) setError(failure.message);
+        setUser(null);
+      }
+    }
+    void loadSession();
+    return () => { controller.abort(); clearTimeout(timer); };
   }, []);
 
   useEffect(() => {
     if (!user) return;
-    void synchronize();
-    const timer = setInterval(synchronize, 3000);
-    return () => clearInterval(timer);
+    return pollWhileVisible(synchronize, 5000);
   }, [user, synchronize]);
 
   async function login(event) {
