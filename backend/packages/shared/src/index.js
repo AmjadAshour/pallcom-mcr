@@ -109,6 +109,7 @@ export const OBS_COMMANDS = Object.freeze({
 });
 
 export const PROGRAM_CANVAS = Object.freeze({ width: 1280, height: 720 });
+export const PROGRAM_SCENE_UPLOAD = Object.freeze({ maxMib: 128, maxSeconds: 60 });
 
 export function watermarkBounds({ anchor, x, y, size }, { width, height } = PROGRAM_CANVAS) {
   const dx = Math.round(width * x / 100);
