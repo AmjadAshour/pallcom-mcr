@@ -7,6 +7,7 @@ import { isIPv4 } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { PROGRAM_CANVAS } from '@mcr/shared';
 import { storedWatermark } from './watermark.js';
+import { storedTicker } from './ticker.js';
 import { createAdRenderer } from './ads.js';
 
 const worker = fileURLToPath(new URL('./worker.py', import.meta.url));
@@ -24,7 +25,7 @@ export const usesLocalSceneAsset = asset => scene?.assets.includes(asset) ?? fal
 function scenePicture(settings, first, image) {
   const { width, height } = PROGRAM_CANVAS;
   return {
-    video: Buffer.from(first).toString('base64'), image: Buffer.from(image).toString('base64'),
+    video: Buffer.from(first).toString('base64'), image: image ? Buffer.from(image).toString('base64') : '',
     x: Math.round(settings.x * width / 100), y: Math.round(settings.y * height / 100),
     w: Math.round(settings.w * width / 100), h: Math.round(settings.h * height / 100)
   };
@@ -65,6 +66,9 @@ export function inputPreviewFrame(input = 'primary') {
 export function updateWatermark(packet) {
   if (child && status.state !== 'stopping') child.stdin.write(JSON.stringify(packet) + '\n');
 }
+export function updateTicker(ticker) {
+  if (child && status.state !== 'stopping') child.stdin.write(JSON.stringify({ ticker }) + '\n');
+}
 let status = { state: 'stopped' };
 
 export function configured(id) {
@@ -103,7 +107,7 @@ function port(value) {
   return number;
 }
 
-function start(watermark, ads) {
+function start(watermark, ads, ticker) {
   const blackSeconds = Number(process.env.MCR_PROGRAM_BLACK_SECONDS ?? 0);
   const silenceSeconds = Number(process.env.MCR_PROGRAM_SILENCE_SECONDS ?? 0);
   if (!Number.isInteger(silenceSeconds) || silenceSeconds < 0 || silenceSeconds > 60) {
@@ -194,7 +198,7 @@ function start(watermark, ads) {
     ...(inputUrl ? { inputMode: 'url' } : { inputMode: 'udp', inputHost, inputPort: input }) };
   const result = waitFor('start');
   proc.stdin.on('error', () => proc.kill());
-  proc.stdin.write(JSON.stringify({ canvas: PROGRAM_CANVAS, ...watermark, inputUrl: inputUrl?.href,
+  proc.stdin.write(JSON.stringify({ canvas: PROGRAM_CANVAS, ...watermark, ticker, inputUrl: inputUrl?.href,
     recordingPath: recordingFile ? join(recordingDir, recordingFile) : null, srtUrl: srt?.href, blackSeconds, freezeSeconds,
     silenceSeconds, secondPort, autoBackup }) + '\n');
   proc.on('error', () => settle(failure('Could not launch Program worker', 503)));
@@ -219,7 +223,8 @@ function start(watermark, ads) {
     if (message.input2Preview) { secondInputFrame = { image: message.input2Preview, at: Date.now() }; return; }
     if (message.recordingFinal) { status.recording = message.recordingFinal; return; }
     if (!message.status || status.state === 'stopping') return;
-    status = { ...status, ...message.status };
+    status = { ...status, ...message.status,
+      sceneVideo: message.status.source === 'scene' ? scene?.assets[0] : undefined };
     if (status.obs === 'disconnected') inputFrame = null;
     if (status.obs2 === 'disconnected') secondInputFrame = null;
     if (status.source !== 'scene' && (pending?.action !== 'scene' || message.reply === 'sceneUnavailable')) scene = undefined;
@@ -255,10 +260,10 @@ export function stopProgram() {
   watchdog = setTimeout(() => child?.kill(), 3000);
 }
 
-export async function programAction(id, action, watermark = { revision: 0, bitmap: '' }, ads, gainDb) {
+export async function programAction(id, action, watermark = { revision: 0, bitmap: '' }, ads, gainDb, ticker) {
   if (!configured(id)) throw failure('Independent Program is not configured for this station');
   if (pending) throw failure('A Program action is pending');
-  if (action === 'start') return child ? programStatus(id) : start(watermark, ads);
+  if (action === 'start') return child ? programStatus(id) : start(watermark, ads, ticker);
   if (action === 'stop') {
     if (!child) return programStatus(id);
     const result = waitFor(action);
@@ -275,5 +280,5 @@ export async function programAction(id, action, watermark = { revision: 0, bitma
 }
 
 export function startConfiguredProgram(id) {
-  return programAction(id, 'start', storedWatermark(id), createAdRenderer(id));
+  return programAction(id, 'start', storedWatermark(id), createAdRenderer(id), undefined, storedTicker(id));
 }

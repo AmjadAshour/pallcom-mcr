@@ -54,7 +54,7 @@ pipeline = Gst.parse_launch(
     "video/x-raw,width=320,height=180,framerate=1/1 ! jpegenc ! appsink name=preview max-buffers=1 drop=true sync=false async=false "
     "picture. ! queue ! "
     + "".join(f"gdkpixbufoverlay name=ad{i} alpha=0 positioning-mode=pixels-absolute ! " for i in range(4))
-    + "gdkpixbufoverlay name=watermark ! tee name=composed "
+    + "gdkpixbufoverlay name=watermark ! gdkpixbufoverlay name=ticker positioning-mode=pixels-absolute alpha=0 ! tee name=composed "
     "composed. ! queue leaky=downstream max-size-buffers=1 ! videorate drop-only=true ! videoscale ! "
     "video/x-raw,width=320,height=180,framerate=2/1 ! jpegenc ! "
     "appsink name=program_monitor max-buffers=1 drop=true sync=false async=false "
@@ -84,6 +84,8 @@ inputs = {
     if port
 }
 watermark_revision = 0
+ticker_revision = 0
+ticker = None
 ads_revision = 0
 visible_ads = []
 ad_ready = [False] * 4
@@ -237,6 +239,7 @@ def report(reply=None):
     global previous
     status = dict(state="running" if last_packet else "starting", source=source, obs=inputs["obs"].health,
                   watermarkRevision=watermark_revision, adsRevision=ads_revision, visibleAds=visible_ads,
+                  tickerRevision=ticker_revision,
                   recording=recording_state, srt=srt_state, inputAudioDbfs=inputs["obs"].reported_audio_level,
                   programAudioDbfs=reported_program_audio,
                   programGainDb=program_gain_db,
@@ -305,11 +308,12 @@ def scene_pixbuf(bitmap, kind):
 def render_scene_preview(config):
     interpolation = GdkPixbuf.InterpType.BILINEAR
     picture = scene_pixbuf(config["video"], "jpeg").scale_simple(width, height, interpolation)
-    logo = scene_pixbuf(config["image"], "png")
-    x, y = config["x"], config["y"]
-    w, h = min(config["w"], width - x), min(config["h"], height - y)
-    logo.composite(picture, x, y, w, h, x, y,
-                   config["w"] / logo.get_width(), config["h"] / logo.get_height(), interpolation, 255)
+    if config["image"]:
+        logo = scene_pixbuf(config["image"], "png")
+        x, y = config["x"], config["y"]
+        w, h = min(config["w"], width - x), min(config["h"], height - y)
+        logo.composite(picture, x, y, w, h, x, y,
+                       config["w"] / logo.get_width(), config["h"] / logo.get_height(), interpolation, 255)
     preview = picture.scale_simple(320, 180, interpolation)
     _, encoded = preview.save_to_bufferv("jpeg", [], [])
     return "data:image/jpeg;base64," + base64.b64encode(encoded).decode("ascii")
@@ -318,21 +322,55 @@ def render_scene_preview(config):
 def apply_scene(config):
     global scene_audio
     picture = scene_pixbuf(config["video"], "jpeg")
-    logo = scene_pixbuf(config["image"], "png")
     background = pipeline.get_by_name("scenevideo")
     background.set_property("pixbuf", picture)
     background.set_property("overlay-width", width)
     background.set_property("overlay-height", height)
     image = pipeline.get_by_name("sceneimage")
-    image.set_property("pixbuf", logo)
-    for prop, key in (("offset-x", "x"), ("offset-y", "y"), ("overlay-width", "w"), ("overlay-height", "h")):
-        image.set_property(prop, config[key])
+    if config["image"]:
+        image.set_property("pixbuf", scene_pixbuf(config["image"], "png"))
+        for prop, key in (("offset-x", "x"), ("offset-y", "y"), ("overlay-width", "w"), ("overlay-height", "h")):
+            image.set_property(prop, config[key])
     select("scene", config.get("fade", False))
     pcm = base64.b64decode(config["audio"])
     size = config["audioBytes"]
     scene_audio = (pcm[:size].ljust(size, b"\x00"), audio_sample) if pcm else None
     background.set_property("alpha", 1.0)
-    image.set_property("alpha", 1.0)
+    image.set_property("alpha", 1.0 if config["image"] else 0.0)
+
+
+def draw_ticker():
+    if ticker is None:
+        return True
+    image, speed, direction, started_at = ticker
+    strip_width = image.get_width()
+    strip_height = image.get_height()
+    travel = int((time.monotonic() - started_at) * speed) % (width + strip_width)
+    x = width - travel if direction == "left" else travel - strip_width
+    strip = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, True, 8, width, strip_height)
+    strip.fill(0x111827ff)
+    start_x = max(0, x)
+    visible = min(width, x + strip_width) - start_x
+    if visible > 0:
+        image.copy_area(start_x - x, 0, visible, strip_height, strip, start_x, 0)
+    pipeline.get_by_name("ticker").set_property("pixbuf", strip)
+    return True
+
+
+def apply_ticker(packet):
+    global ticker, ticker_revision
+    overlay = pipeline.get_by_name("ticker")
+    if packet["bitmap"]:
+        image = scene_pixbuf(packet["bitmap"], "png")
+        settings = packet["settings"]
+        ticker = (image, settings["speed"], settings["direction"], time.monotonic())
+        overlay.set_property("offset-y", height - image.get_height())
+        draw_ticker()
+        overlay.set_property("alpha", 1.0)
+    else:
+        ticker = None
+        overlay.set_property("alpha", 0.0)
+    ticker_revision = packet["revision"]
 
 
 def command(line):
@@ -370,6 +408,8 @@ def command(line):
         elif "adLayers" in packet:
             apply_ads(packet)
             print('{"adsReceived":true}', flush=True)
+        elif "ticker" in packet:
+            apply_ticker(packet["ticker"])
         else:
             apply_watermark(packet)
         report()
@@ -537,7 +577,7 @@ def service_input(feed, now, meter_due):
         black = feed.black_since is not None and now - feed.black_since >= black_seconds
         frozen = feed.freeze_since is not None and now - feed.freeze_since >= freeze_seconds
         silence_start = feed.silent_since
-        silent = silence_start is not None and now - silence_start >= silence_seconds
+        silent = silence_seconds > 0 and silence_start is not None and now - silence_start >= silence_seconds
         if black or frozen or silent:
             feed.healthy_since = None
             feed.health = "black" if black else "frozen" if frozen else "silent"
@@ -587,6 +627,8 @@ fade_layer.set_property("overlay-width", width)
 fade_layer.set_property("overlay-height", height)
 select("fallback")
 apply_watermark(initial)
+if initial.get("ticker"):
+    apply_ticker(initial["ticker"])
 pipeline.set_state(Gst.State.PLAYING)
 srt_thread = None
 if srt_url:
@@ -597,6 +639,7 @@ if recording_path:
     recorder = threading.Thread(target=record_program, daemon=True)
     recorder.start()
 GLib.timeout_add(80, tick)
+GLib.timeout_add(40, draw_ticker)
 threading.Thread(target=read_commands, daemon=True).start()
 try:
     loop.run()

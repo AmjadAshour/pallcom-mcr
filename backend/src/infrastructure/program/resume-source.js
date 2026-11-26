@@ -19,12 +19,12 @@ export async function takeSavedScene(id, settings, fade = false) {
   const db = getSqliteDatabase();
   const frame = db.prepare('SELECT data FROM ad_frames WHERE stationId=? AND asset=? AND frame=?');
   const video = db.prepare("SELECT frames FROM ad_assets WHERE stationId=? AND id=? AND kind='video'").get(id, settings.video);
-  const image = frame.get(id, settings.image, 0);
-  if (!video?.frames || !image || !frame.get(id, settings.video, 0)) {
+  const image = settings.image && frame.get(id, settings.image, 0);
+  if (!video?.frames || (settings.image && !image) || !frame.get(id, settings.video, 0)) {
     throw Object.assign(new Error('A scene asset is unavailable'), { statusCode:409 });
   }
   const audio = db.prepare('SELECT pcm FROM ad_asset_audio WHERE stationId=? AND asset=?').get(id, settings.video);
-  return takeLocalScene(settings, video.frames, Buffer.from(image.data),
+  return takeLocalScene(settings, video.frames, image?.data,
     index => frame.get(id, settings.video, index)?.data, audio?.pcm, fade);
 }
 
@@ -42,7 +42,7 @@ export async function restoreProgramSource(id, session) {
       await takeSavedScene(id, selection.scene);
       return 'restored';
     }
-    const input = selection.scene?.input === 'secondary' ? 'obs2' : 'obs';
+    const input = selection.source === 'obs2' || selection.scene?.input === 'secondary' ? 'obs2' : 'obs';
     if (current[input] === 'ready') {
       await programAction(id, input);
       return 'restored';
