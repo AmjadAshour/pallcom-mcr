@@ -20,9 +20,7 @@ export const translations = {
       scheduler: 'Scheduler',
       activityLogs: 'Activity Logs',
       usersPermissions: 'Users & Permissions',
-      settings: 'Settings',
-      operatorRole: 'SUPER ADMIN',
-      leadOperator: 'OP-AMJAD'
+      settings: 'Settings'
     },
     header: {
       air: 'AIR',
@@ -250,9 +248,7 @@ export const translations = {
       scheduler: 'جدولة البث',
       activityLogs: 'سجل النشاطات',
       usersPermissions: 'المستخدمون والصلاحيات',
-      settings: 'الإعدادات',
-      operatorRole: 'مشرف عام (سوبر أدمن)',
-      leadOperator: 'المشغّل: أمجد'
+      settings: 'الإعدادات'
     },
     header: {
       air: 'على الهواء',
