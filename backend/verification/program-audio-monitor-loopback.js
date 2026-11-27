@@ -7,6 +7,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { closeFixtureProcess } from './close-fixture-process.js';
 
 const secret = () => randomBytes(32).toString('hex');
 Object.assign(process.env, {
@@ -192,8 +193,11 @@ try {
   console.log('Program starts with audio monitoring disabled');
 } finally {
   await browser?.close();
-  for (const device of devices) device.kill();
-  await action('stop');
-  server.closeAllConnections();
-  await new Promise(resolve => server.close(resolve));
+  const closed = Promise.all(devices.map(device => closeFixtureProcess(device, 'Audio FFmpeg')));
+  try {
+    await action('stop');
+  } finally {
+    server.closeAllConnections();
+    await Promise.all([new Promise(resolve => server.close(resolve)), closed]);
+  }
 }

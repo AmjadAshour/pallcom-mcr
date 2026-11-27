@@ -32,3 +32,21 @@ jobs:
           git checkout --detach FETCH_HEAD
       - name: Download public advisories and scan without network access
         run: bash backend/verification/offline-npm-advisories.sh
+
+  vite-lockfile-candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out the public review commit
+        run: |
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Resolve the patched Vite lockfile without lifecycle scripts or audit requests
+        run: |
+          npm install --workspace @mcr/web --save-dev --save-exact vite@6.4.6 --package-lock-only --ignore-scripts --no-audit --no-fund
+          git diff --check -- frontend/package.json package-lock.json
+          printf 'VITE_LOCKFILE_PATCH='
+          git diff --binary -- frontend/package.json package-lock.json | gzip -c | base64 -w0
+          printf '\n'

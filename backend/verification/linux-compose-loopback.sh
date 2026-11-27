@@ -69,4 +69,4 @@ media_image="$("${compose[@]}" images -q server)"
 [[ -n "$media_image" ]]
 docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
   --user 1000:1000 -e MCR_PROGRAM_PYTHON=/usr/bin/python3 "$media_image" \
-  sh -ec 'node --version; node backend/verification/hls-loopback.js; node backend/verification/program-audio-monitor-loopback.js'
+  sh -ec 'node --version; timeout -k 5s 120s node backend/verification/hls-loopback.js; timeout -k 5s 120s node backend/verification/program-audio-monitor-loopback.js'

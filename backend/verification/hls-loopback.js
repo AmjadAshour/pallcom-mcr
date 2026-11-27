@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import express from 'express';
 import { inspectTransport } from '../scripts/inspect-program-ts.js';
+import { closeFixtureProcess } from './close-fixture-process.js';
 
 const directory = mkdtempSync(join(tmpdir(), 'mcr-hls-fixture-'));
 const secret = () => randomBytes(32).toString('hex');
@@ -92,12 +93,6 @@ async function until(label, pass) {
 }
 const udp = receiver('udp://127.0.0.1:25532');
 let hls;
-async function closeReceiver(child) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  const closed = once(child, 'close');
-  child.kill();
-  await closed;
-}
 function assertPrivacy(response) {
   assert.equal(response.headers.get('cache-control'), 'private, no-store');
   assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
@@ -204,7 +199,7 @@ try {
   assert.equal((await fetch(playback)).status, 404);
   assert.equal((await fetch(playlist, { headers:headers(viewer) })).status, 404);
   await until('HLS session files are cleaned after stop', () => !readdirSync(directory).includes(segmentDirectory));
-  await closeReceiver(hls.child);
+  await closeFixtureProcess(hls.child, 'HLS receiver');
   const blocked = await program('start');
   assert.equal(blocked.hls, 'starting');
   const staging = readdirSync(directory).find(name => name.startsWith('program-hls-'));
@@ -231,10 +226,14 @@ try {
 } catch (error) {
   fixtureError = error;
 } finally {
-  const receivers = Promise.all([closeReceiver(hls?.child), closeReceiver(udp.child)]);
+  const receivers = Promise.all([
+    closeFixtureProcess(hls?.child, 'HLS receiver'),
+    closeFixtureProcess(udp.child, 'UDP receiver')
+  ]);
   try {
     await program('stop');
     stopped = true;
+    console.log('Program worker stopped during fixture cleanup');
   } catch (error) {
     fixtureError ??= error;
   }

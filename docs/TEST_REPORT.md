@@ -252,3 +252,25 @@ The Windows checks used the checksum-verified portable [Node.js 22.23.5](https:/
 - Three serial `node backend/verification/hls-loopback.js` runs under Node 22 exited 0. Each verified signed station and session scope, independent receivers and continued UDP after an injected HLS writer failure. The fixture now reports success after closing its receivers, HTTP servers and SQLite connection and removing its temporary data.
 
 A deliberately missing Python worker reproduced `UV_HANDLE_CLOSING` and exit `-1073740791` in Node 24.15.0 after a fixture assertion. The worker had already reported a spawn failure. Handling the assertion within the fixture, waiting for teardown and setting the exit status without an uncaught rejection produced a normal failure exit of 1 on Node 22 and Node 24. A subsequent successful playback case exited 0 on each runtime. The test's temporary root contained exactly the two retained diagnostic directories from the expected failures. This establishes one fixture shutdown path that reproduced the symptom. The original intermittent failure's root cause and Linux target parity remain open.
+### Offline npm dependency scan in the isolated GitHub job
+
+[Run 45919279288](https://github.com/AmjadAshour/pallcom-mcr/actions/runs/45919279288) finished the offline scan using checksum-verified OSV Scanner 2.7.1. The public npm database ZIP had SHA-256 `c2fb37ffe2f8afe8119e488f701cc23bb9ed54ad30c0d053092456dadc8cea6e`. The scanner subprocess ran in a network namespace without a network connection. The workflow downloaded the public scanner and database before opening the repository lockfile for the offline match.
+
+| Locked package | Advisory-package matches |
+| --- | ---: |
+| Electron 30.5.1 | 45 |
+| Vite 5.4.21 | 8 |
+| extract-zip 2.0.1 | 2 |
+| esbuild 0.21.5 | 1 |
+
+OSV returned 472 package records and 56 advisory-package matches, all classified outside the npm production lockfile set. The job failed with exit 1 because findings existed. Electron is the desktop app's runtime even though its manifest declares it as a development dependency. The desktop distribution and installation path therefore still require remediation and real runtime testing. The npm scan did not cover operating-system or container-base packages.
+
+The Vite development server was configured to bind only to IPv4 loopback. A real local `createServer` probe confirmed the listen address and successfully fetched the local index. This reduces exposure while the dependency update remains open. Vite identifies 6.4.6 as a patched release for published network-exposed dev server issues. The local npm registry lookup timed out before a verifiable lockfile update could be generated. The existing Vite version remains locked. [Vite maintainer advisory](https://github.com/vitejs/vite/security/advisories/GHSA-p4f5-76q4-ffq7)
+
+### Linux Compose and media CI
+
+[Linux run 45919142222](https://github.com/AmjadAshour/pallcom-mcr/actions/runs/45919142222) built both Compose images and passed actual Linux Nginx configuration validation, loopback TLS, security headers, API gateway authorization and legacy IPTV denial. The Debian Node 22 media container decoded authorized HLS and UDP and verified that UDP continued after an injected HLS writer failure and with an unavailable HLS directory.
+
+The job reached the last HLS playback assertion and timed out during teardown. It did not reach the audio fixture. The follow-up bounds termination of the fixture-owned FFmpeg receivers, logs completion of the Program worker stop and places a timeout around each media command. The matching Linux rerun remains required.
+
+The local shutdown logic passed in-memory checks for a receiver that exits after SIGTERM and one that requires SIGKILL. Syntax and patch checks passed. The automatic approval reviewer blocked the new media integration run and the commit/push because it applied the earlier read-only audit scope. This follow-up remains local until temporary integration testing and publication to the CI branch are authorized again.
