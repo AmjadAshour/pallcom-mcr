@@ -3,6 +3,7 @@ import { api } from '../context/api.js';
 import { useMcrStore } from '../context/useMcrStore.js';
 import { translations } from '../i18n/translations.js';
 import { Card, CardHeader, CardTitle, CardContent, Input, Button } from '@mcr/ui';
+import { csvTextCell } from '@mcr/shared';
 import { FileText, Search, Download } from 'lucide-react';
 
 export function ActivityLogsPage() {
@@ -28,12 +29,7 @@ export function ActivityLogsPage() {
 
   function exportCsv() {
     const columns = ['timestamp', 'operator', 'action', 'resource', 'details', 'ip', 'status'];
-    const cell = (value) => {
-      const text = String(value ?? '');
-      const escaped = /^[\s=+@-]/.test(text) ? "'" + text : text;
-      return '"' + escaped.replaceAll('"', '""') + '"';
-    };
-    const csv = [columns.join(','), ...filteredLogs.map((log) => columns.map((column) => cell(log[column])).join(','))].join('\r\n');
+    const csv = [columns.join(','), ...filteredLogs.map((log) => columns.map((column) => csvTextCell(log[column])).join(','))].join('\r\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a');
     link.href = url;

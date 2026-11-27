@@ -187,3 +187,7 @@ For LAN contribution, set MCR_PROGRAM_INPUT_HOST on the server to its assigned p
 زر **تنزيل سجل الجدولة CSV** يصدّر أحدث 10,000 موعد للمحطة. تُعرض الأوقات بتوقيت UTC، وتعني take_accepted أن المحرك قبل أمر Take. يتضمن الملف نتيجة التجاوز أو التعذّر عند وجودها.
 
 اختر **تعديل الموعد** بجانب حدث معلّق لإعادة جدولته بتوقيت جهازك. يحتفظ الحدث بمعرّفه والمشهد والتكرار. تعديل حدث من قائمة متسلسلة يغيّر هذا الموعد وحده. إذا تعارض الوقت الجديد مع حدث آخر، يبقى الموعد الأصلي.
+
+### Private UDP opt-in
+
+For the private LAN workflow above, also set `MCR_PROGRAM_TRUST_PRIVATE_UDP=1` after confirming firewall restrictions for the authorized sender. Loopback requires no opt-in. Test receiver continuity and unauthorized network denial in isolated deployment staging.

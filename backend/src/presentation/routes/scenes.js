@@ -1,21 +1,21 @@
 import { Router } from 'express';
 import { createProgramSchedule } from '../../infrastructure/program/schedule.js';
 import { z } from 'zod';
-import { PROGRAM_SCENE_UPLOAD } from '@mcr/shared';
-import { authenticate } from '../middlewares/auth.middleware.js';
+import { csvTextCell, PROGRAM_SCENE_UPLOAD } from '@mcr/shared';
+import { authenticate, hasCurrentPermission } from '../middlewares/auth.middleware.js';
 import { authorize } from '../middlewares/rbac.middleware.js';
+import { mediaUploadLimiter } from '../middlewares/rate-limiter.middleware.js';
 import { validateBody } from '../middlewares/validate.middleware.js';
 import { getSqliteDatabase } from '../../infrastructure/database/sqlite.js';
 import { insertAuditEvent } from '../../infrastructure/repositories/sqlite-audit-repository.js';
 import { configured, renderLocalScenePreview, setSourceRecovery } from '../../infrastructure/program/supervisor.js';
 import { rememberProgramSource, takeSavedScene } from '../../infrastructure/program/resume-source.js';
 import { prepareSceneVideo } from '../../infrastructure/program/ad-creatives.js';
-import { storeCreative } from '../../infrastructure/program/creative-library.js';
+import { reserveCreativeUpload, storeCreative } from '../../infrastructure/program/creative-library.js';
 
 export const scenesRouter = Router();
 const root = '/stations/:id/program/local-scene';
 const uploadName = z.string().trim().min(1).max(100);
-let uploading = false;
 const localSchema = z.object({
   id: z.string().uuid().optional(), name: z.string().trim().min(1).max(80).optional(),
   video: z.string().uuid(), image: z.string().uuid().or(z.literal('')).optional(),
@@ -54,12 +54,6 @@ scenesRouter.get(root + '/schedule', (req,res) => {
   res.json({success:true,data});
 });
 
-function csvCell(value) {
-  const text = String(value ?? '');
-  const safe = /^\s*[=+@-]|^[\t\r\n]/.test(text) ? "'" + text : text;
-  return '"' + safe.replaceAll('"', '""') + '"';
-}
-
 scenesRouter.get(root + '/schedule.csv', (req,res) => {
   const rows = getSqliteDatabase().prepare(`SELECT id,sceneId,scene,dueAt,state,executedAt,error,
     EXISTS(SELECT 1 FROM program_schedule_daily WHERE jobId=id) AS repeatDaily
@@ -69,7 +63,7 @@ scenesRouter.get(root + '/schedule.csv', (req,res) => {
   for (const row of rows) {
     lines.push([row.id,row.sceneId,JSON.parse(row.scene).name,row.dueAt === null ? '' : timestamp(row.dueAt),
       row.state === 'aired' ? 'take_accepted' : row.state,timestamp(row.executedAt),
-      row.repeatDaily ? 'yes' : 'no',row.error].map(csvCell).join(','));
+      row.repeatDaily ? 'yes' : 'no',row.error].map(csvTextCell).join(','));
   }
   res.attachment('program-schedule.csv').type('text/csv').send('\uFEFF' + lines.join('\r\n') + '\r\n');
 });
@@ -187,7 +181,7 @@ scenesRouter.get(root + '/library', (req, res) => {
   res.json({ success: true, data: scenes });
 });
 
-scenesRouter.post(root + '/video', async (req, res, next) => {
+scenesRouter.post(root + '/video', mediaUploadLimiter, async (req, res, next) => {
   const name = uploadName.safeParse(req.query.name);
   if (!name.success || !req.is('video/mp4')) {
     return res.status(400).json({ success: false, error: 'Choose a named MP4 video' });
@@ -195,14 +189,14 @@ scenesRouter.post(root + '/video', async (req, res, next) => {
   if (Number(req.get('Content-Length')) > PROGRAM_SCENE_UPLOAD.maxMib * 1024 ** 2) {
     return res.status(413).json({ success: false, error: 'Video exceeds the upload limit' });
   }
-  if (uploading) return res.status(409).json({ success: false, error: 'Another video is being prepared' });
   const db = getSqliteDatabase();
   const id = req.params.id;
   if (db.prepare('SELECT count(*) AS total FROM ad_assets WHERE stationId=?').get(id).total >= 32) {
     return res.status(409).json({ success: false, error: 'Media library is full (32 files)' });
   }
-  uploading = true;
+  let release;
   try {
+    release = reserveCreativeUpload();
     let prepared;
     try { prepared = await prepareSceneVideo(req); }
     catch (error) {
@@ -213,6 +207,7 @@ scenesRouter.post(root + '/video', async (req, res, next) => {
         error: 'Unreadable MP4 or video exceeds the ' + PROGRAM_SCENE_UPLOAD.maxSeconds + '-second limit' });
     }
     if (res.destroyed) return;
+    if (!hasCurrentPermission(req.user, 'station:control')) return res.sendStatus(403);
     if (!ownsStation(req)) return res.sendStatus(404);
     db.exec('BEGIN IMMEDIATE');
     let asset;
@@ -224,7 +219,7 @@ scenesRouter.post(root + '/video', async (req, res, next) => {
     } catch (error) { db.exec('ROLLBACK'); throw error; }
     res.status(201).json({ success: true, data: asset });
   } catch (error) { next(error); }
-  finally { uploading = false; }
+  finally { release?.(); }
 });
 
 scenesRouter.post(root + '/video/take', validateBody(z.object({ video: z.string().uuid() }).strict()), async (req, res, next) => {

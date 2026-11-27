@@ -72,6 +72,11 @@ export function getSqliteDatabase() {
       updatedAt TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS program_station_selection (
+      singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+      stationId TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS pairing_tokens (
       id TEXT PRIMARY KEY,
       stationId TEXT NOT NULL,
@@ -95,7 +100,7 @@ export function getSqliteDatabase() {
     );
 
     CREATE TABLE IF NOT EXISTS station_graphics_tokens (
-      stationId TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE
+      stationId TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, expiresAt INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS station_graphics (
@@ -184,6 +189,25 @@ export function getSqliteDatabase() {
       createdAt TEXT NOT NULL
     );
   `);
+
+  const graphicsHasExpiry = () => dbInstance.prepare('PRAGMA table_info(station_graphics_tokens)')
+    .all().some(column => column.name === 'expiresAt');
+  try {
+    if (!graphicsHasExpiry()) {
+      dbInstance.exec('BEGIN IMMEDIATE');
+      try {
+        if (!graphicsHasExpiry()) dbInstance.exec('ALTER TABLE station_graphics_tokens ADD COLUMN expiresAt INTEGER');
+        dbInstance.exec('COMMIT');
+      } catch (error) {
+        dbInstance.exec('ROLLBACK');
+        throw error;
+      }
+    }
+  } catch (error) {
+    dbInstance.close();
+    dbInstance = null;
+    throw error;
+  }
 
   return dbInstance;
 }

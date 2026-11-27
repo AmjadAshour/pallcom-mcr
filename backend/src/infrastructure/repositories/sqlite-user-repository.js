@@ -1,5 +1,6 @@
 import { IUserRepository, User } from '@mcr/domain';
 import { getSqliteDatabase } from '../database/sqlite.js';
+import { insertAuditEvent } from './sqlite-audit-repository.js';
 import crypto from 'node:crypto';
 
 export class SqliteUserRepository extends IUserRepository {
@@ -25,7 +26,7 @@ export class SqliteUserRepository extends IUserRepository {
       .all(organizationId);
   }
 
-  async create(data) {
+  async create(data, { actor } = {}) {
     const id = data.id || crypto.randomUUID();
     const now = new Date().toISOString();
 
@@ -34,7 +35,7 @@ export class SqliteUserRepository extends IUserRepository {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    stmt.run(
+    const values = [
       id,
       data.email.toLowerCase().trim(),
       data.passwordHash,
@@ -44,7 +45,29 @@ export class SqliteUserRepository extends IUserRepository {
       data.organizationId || null,
       now,
       now
-    );
+    ];
+
+    if (actor) {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        stmt.run(...values);
+        insertAuditEvent(this.db, {
+          organizationId: data.organizationId,
+          userId: actor.id,
+          action: 'USER_CREATED',
+          resourceType: 'User',
+          resourceId: id,
+          details: { role: data.role },
+          ipAddress: actor.ipAddress
+        });
+        this.db.exec('COMMIT');
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    } else {
+      stmt.run(...values);
+    }
 
     return await this.findById(id);
   }

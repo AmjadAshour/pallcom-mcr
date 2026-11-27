@@ -11,6 +11,7 @@ import { validateBody } from '../middlewares/validate.middleware.js';
 export const graphicsRouter = Router();
 const kinds = ['ad', 'logo', 'ticker'];
 const root = '/stations/:id/graphics';
+const graphicsLinkLifetime = 90 * 24 * 60 * 60 * 1000;
 
 export function decodeImage(image) {
   const match = /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/.exec(image);
@@ -79,20 +80,31 @@ function readItems(db, stationId) {
 
 graphicsRouter.get(root, authenticate, authorize('station:control'), stationHandler((req, res, db) => {
   const id = req.params.id;
-  db.prepare('INSERT OR IGNORE INTO station_graphics_tokens (stationId, token) VALUES (?, ?)')
-    .run(id, randomBytes(32).toString('hex'));
-  const { token } = db.prepare('SELECT token FROM station_graphics_tokens WHERE stationId = ?').get(id);
+  db.prepare('INSERT OR IGNORE INTO station_graphics_tokens (stationId, token, expiresAt) VALUES (?, ?, ?)')
+    .run(id, randomBytes(32).toString('hex'), Date.now() + graphicsLinkLifetime);
+  const { token, expiresAt } = db.prepare('SELECT token, expiresAt FROM station_graphics_tokens WHERE stationId = ?').get(id);
   const items = readItems(db, id).map(({ kind, content, image, published, expiresAt }) => ({
     kind, content, image, expiresAt, active: active({ published, expiresAt })
   }));
-  res.set('Cache-Control', 'no-store').json({ success: true, data: { token, items } });
+  res.set('Cache-Control', 'no-store').json({
+    success: true, data: { token: expiresAt === null || expiresAt > Date.now() ? token : null, expiresAt, items }
+  });
 }));
 
 graphicsRouter.post(root + '/rotate-link', authenticate, authorize('station:control'), stationHandler((req, res, db) => {
   const token = randomBytes(32).toString('hex');
-  db.prepare(`INSERT INTO station_graphics_tokens (stationId, token) VALUES (?, ?)
-    ON CONFLICT(stationId) DO UPDATE SET token = excluded.token`).run(req.params.id, token);
-  res.set('Cache-Control', 'no-store').json({ success: true, token });
+  const expiresAt = Date.now() + graphicsLinkLifetime;
+  db.prepare(`INSERT INTO station_graphics_tokens (stationId, token, expiresAt) VALUES (?, ?, ?)
+    ON CONFLICT(stationId) DO UPDATE SET token = excluded.token, expiresAt = excluded.expiresAt`)
+    .run(req.params.id, token, expiresAt);
+  res.set('Cache-Control', 'no-store').json({ success: true, token, expiresAt });
+}));
+
+graphicsRouter.delete(root + '/link', authenticate, authorize('station:control'), stationHandler((req, res, db) => {
+  db.prepare(`INSERT INTO station_graphics_tokens (stationId, token, expiresAt) VALUES (?, ?, 0)
+    ON CONFLICT(stationId) DO UPDATE SET token = excluded.token, expiresAt = 0`)
+    .run(req.params.id, randomBytes(32).toString('hex'));
+  res.set('Cache-Control', 'no-store').sendStatus(204);
 }));
 
 graphicsRouter.put(root + '/:kind', authenticate, authorize('station:control'), validateBody(settingsSchema), validateImage, stationHandler((req, res, db) => {
@@ -131,11 +143,12 @@ graphicsRouter.delete(root + '/:kind', authenticate, authorize('station:control'
 }));
 
 function publicStation(req, res, next) {
-  res.set('Cache-Control', 'no-store');
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' });
   if (!/^[a-f0-9]{64}$/.test(req.params.token)) return res.sendStatus(404);
   const db = getSqliteDatabase();
   const station = db.prepare(`SELECT s.id FROM station_graphics_tokens AS t
-    JOIN stations AS s ON s.id = t.stationId WHERE t.token = ?`).get(req.params.token);
+    JOIN stations AS s ON s.id = t.stationId WHERE t.token = ? AND (t.expiresAt IS NULL OR t.expiresAt > ?)`)
+    .get(req.params.token, Date.now());
   if (!station) return res.sendStatus(404);
   res.locals.stationId = station.id;
   next();

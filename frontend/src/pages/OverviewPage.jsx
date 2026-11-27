@@ -1,11 +1,13 @@
 import React from 'react';
+import { Link } from 'react-router-dom';
 import { useMcrStore } from '../context/useMcrStore.js';
 import { translations } from '../i18n/translations.js';
 import { Card, CardHeader, CardTitle, CardContent, StatusBadge, TallyIndicator } from '@mcr/ui';
-import { Radio, Activity, Film, ShieldAlert } from 'lucide-react';
+import { Radio, Activity, Film } from 'lucide-react';
 
 export function OverviewPage() {
   const { language, stations } = useMcrStore();
+  const ar = language === 'ar';
   const t = translations[language] || translations.en;
 
   const totalStations = stations.length;
@@ -15,13 +17,18 @@ export function OverviewPage() {
 
   return (
     <div className="space-y-4">
-      {/* Top Metric Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold">{t.nav.overview}</h1>
+        <Link to={totalStations ? '/live' : '/stations'} className="rounded border border-cyan-700 px-3 py-2 text-sm text-cyan-200">
+          {totalStations ? t.nav.liveControl : t.stations.addStation}
+        </Link>
+      </header>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <Card className="border-l-4 border-l-cyan-500">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-mono text-zinc-400 uppercase">
-                {t.overview?.stationsOnline || 'Stations Online'}
+                {ar ? 'محطات OBS المتصلة' : 'OBS stations connected'}
               </p>
               <h2 className="text-2xl font-mono font-bold text-white mt-1">
                 {onlineStations} <span className="text-xs text-zinc-500 font-normal">/ {totalStations}</span>
@@ -35,7 +42,7 @@ export function OverviewPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-mono text-zinc-400 uppercase">
-                {t.overview?.activeStreams || 'Active Streams'}
+                {ar ? 'بثوث OBS النشطة' : 'Active OBS streams'}
               </p>
               <h2 className="text-2xl font-mono font-bold text-red-500 mt-1">
                 {streamingStations} <span className="text-xs text-zinc-500 font-normal">{t.overview?.liveOnAir || 'Live On-Air'}</span>
@@ -49,7 +56,7 @@ export function OverviewPage() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-xs font-mono text-zinc-400 uppercase">
-                {t.overview?.activeRecordings || 'Active Recordings'}
+                {ar ? 'تسجيلات OBS النشطة' : 'Active OBS recordings'}
               </p>
               <h2 className="text-2xl font-mono font-bold text-blue-400 mt-1">
                 {recordingStations} <span className="text-xs text-zinc-500 font-normal">{t.overview?.capturing || 'Capturing'}</span>
@@ -59,19 +66,6 @@ export function OverviewPage() {
           </div>
         </Card>
 
-        <Card className="border-l-4 border-l-emerald-500">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-mono text-zinc-400 uppercase">
-                {t.overview?.systemHealth || 'System Health'}
-              </p>
-              <h2 className="text-2xl font-mono font-bold text-emerald-400 mt-1">
-                99.98% <span className="text-xs text-zinc-500 font-normal">{t.overview?.nominal || 'Nominal'}</span>
-              </h2>
-            </div>
-            <ShieldAlert className="w-8 h-8 text-emerald-400 opacity-80" />
-          </div>
-        </Card>
       </div>
 
       {/* Station Fleet Summary Table */}

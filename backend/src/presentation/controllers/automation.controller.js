@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { ROLE_PERMISSIONS } from '@mcr/shared';
 import { getSqliteDatabase } from '../../infrastructure/database/sqlite.js';
 import { RepositoryFactory } from '../../infrastructure/repositories/repository-factory.js';
+import { insertAuditEvent } from '../../infrastructure/repositories/sqlite-audit-repository.js';
 import { agentGateway } from '../../infrastructure/agent/agent-gateway.js';
+import { hasPermission } from '../middlewares/rbac.middleware.js';
 
 const actionCommands = Object.freeze({
   scene: 'SetCurrentProgramScene',
@@ -10,21 +11,29 @@ const actionCommands = Object.freeze({
   recordingStop: 'StopRecord'
 });
 
-function hasPermission(role, permission) {
-  const permissions = ROLE_PERMISSIONS[role] || [];
-  return permissions.includes('*') || permissions.includes(permission);
-}
-
 function database() {
   return getSqliteDatabase();
 }
 
-async function execute(db, job) {
+function transaction(db, write) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const result = write();
+    db.exec('COMMIT');
+    return result;
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+async function execute(db, job, actorId = job.userId) {
   let error = null;
   try {
     if (job.runAt) {
       const user = await RepositoryFactory.getUserRepository().findById(job.userId);
-      if (!user?.isActive || !hasPermission(user.role, 'schedule:manage')) {
+      if (!user?.isActive || (user.organizationId || 'default-org') !== job.organizationId ||
+          !hasPermission(user.role, 'schedule:manage')) {
         throw new Error('The creator is no longer authorized to schedule commands');
       }
     }
@@ -36,7 +45,7 @@ async function execute(db, job) {
   }
   db.prepare('UPDATE station_automations SET status = ?, error = ? WHERE id = ?').run(error ? 'FAILED' : 'SUCCEEDED', error, job.id);
   await RepositoryFactory.getAuditRepository().create({
-    organizationId: job.organizationId, userId: job.userId,
+    organizationId: job.organizationId, userId: actorId,
     action: error ? 'AUTOMATION_FAILED' : 'AUTOMATION_EXECUTED', resourceType: 'Station',
     resourceId: job.stationId, details: { automationId: job.id, name: job.name, error }
   });
@@ -80,9 +89,16 @@ export const AutomationController = {
       if (runAt && Date.parse(runAt) <= Date.now()) return res.status(400).json({ success: false, error: 'Schedule must be in the future' });
       const db = database();
       const id = randomUUID();
-      db.prepare(`INSERT INTO station_automations (id, organizationId, userId, stationId, name, action, sceneName, runAt, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, req.user.organizationId, req.user.id, stationId, name, action, sceneName ?? null,
-        runAt ?? null, runAt ? 'SCHEDULED' : 'READY');
+      const { organizationId, id: userId } = req.user;
+      transaction(db, () => {
+        db.prepare(`INSERT INTO station_automations (id, organizationId, userId, stationId, name, action, sceneName, runAt, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, organizationId, userId, stationId, name, action, sceneName ?? null,
+          runAt ?? null, runAt ? 'SCHEDULED' : 'READY');
+        insertAuditEvent(db, {
+          organizationId, userId, action: 'AUTOMATION_CREATED', resourceType: 'Station', resourceId: stationId,
+          details: { automationId: id, mode: runAt ? 'scheduled' : 'manual' }, ipAddress: req.ip
+        });
+      });
       res.status(201).json({ success: true, id });
     } catch (error) {
       next(error);
@@ -101,20 +117,36 @@ export const AutomationController = {
       if (job.runAt || !['READY', 'SUCCEEDED', 'FAILED'].includes(job.status) || !claim(db, job)) {
         return res.status(409).json({ success: false, error: 'Automation cannot run right now' });
       }
-      const data = await execute(db, job);
+      const data = await execute(db, job, req.user.id);
       res.json({ success: true, data });
     } catch (error) {
       next(error);
     }
   },
 
-  async cancel(req, res) {
-    if (!hasPermission(req.user.role, 'schedule:manage')) {
-      return res.status(403).json({ success: false, error: 'Permission required to cancel schedules' });
+  async cancel(req, res, next) {
+    try {
+      if (!hasPermission(req.user.role, 'schedule:manage')) {
+        return res.status(403).json({ success: false, error: 'Permission required to cancel schedules' });
+      }
+      const db = database();
+      const { organizationId, id: userId } = req.user;
+      const job = transaction(db, () => {
+        const cancelled = db.prepare(`UPDATE station_automations SET status = 'CANCELLED'
+          WHERE id = ? AND organizationId = ? AND status = 'SCHEDULED'
+          RETURNING id, stationId`).get(req.params.id, organizationId);
+        if (cancelled) {
+          insertAuditEvent(db, {
+            organizationId, userId, action: 'AUTOMATION_CANCELLED', resourceType: 'Station',
+            resourceId: cancelled.stationId, details: { automationId: cancelled.id }, ipAddress: req.ip
+          });
+        }
+        return cancelled;
+      });
+      if (!job) return res.status(409).json({ success: false, error: 'Schedule is no longer pending' });
+      res.json({ success: true });
+    } catch (error) {
+      next(error);
     }
-    const result = database().prepare("UPDATE station_automations SET status = 'CANCELLED' WHERE id = ? AND organizationId = ? AND status = 'SCHEDULED'")
-      .run(req.params.id, req.user.organizationId);
-    if (!result.changes) return res.status(409).json({ success: false, error: 'Schedule is no longer pending' });
-    res.json({ success: true });
   }
 };

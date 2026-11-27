@@ -1,10 +1,16 @@
 import { RepositoryFactory } from '../../infrastructure/repositories/repository-factory.js';
 import { CryptoService } from '../../infrastructure/security/crypto-service.js';
-import { env } from '../../config/env.js';
+import { env, isExposedBootstrapPassword } from '../../config/env.js';
 import { ROLE_PERMISSIONS } from '@mcr/shared';
+import { RefreshTokenSchema } from '@mcr/validation';
 import { createSession, revokeSession, rotateSession } from '../../infrastructure/security/session-service.js';
 
 const cookieOptions = { httpOnly: true, secure: env.NODE_ENV === 'production', sameSite: 'strict' };
+
+function exposeClientToken(req) {
+  return !req.get('Origin') && !req.get('Sec-Fetch-Site') &&
+    !req.cookies?.mcr_access_token && !req.cookies?.mcr_refresh_token;
+}
 
 function setSessionCookies(res, userId, sessionId, tokens) {
   const accessToken = CryptoService.signAccessToken({ sub: userId, sid: sessionId });
@@ -12,7 +18,6 @@ function setSessionCookies(res, userId, sessionId, tokens) {
     ...cookieOptions, expires: new Date(CryptoService.verifyAccessToken(accessToken).exp * 1000)
   });
   res.cookie('mcr_refresh_token', tokens.refresh, { ...cookieOptions, expires: new Date(tokens.expiresAt) });
-  res.set('Cache-Control', 'no-store');
   return accessToken;
 }
 
@@ -28,7 +33,10 @@ export class AuthController {
         return res.status(401).json({ success: false, error: 'Invalid email or password' });
       }
 
-      const isValidPassword = await CryptoService.verifyPassword(user.passwordHash, password);
+      const usingExposedBootstrapPassword = env.REQUIRE_PRIVATE_SECRETS &&
+        user.email === 'admin@mcrpro.local' && isExposedBootstrapPassword(password);
+      const isValidPassword = await CryptoService.verifyPassword(user.passwordHash, password) &&
+        !usingExposedBootstrapPassword;
       if (!isValidPassword) {
         await auditRepo.create({
           organizationId: user.organizationId || 'default-org',
@@ -55,7 +63,7 @@ export class AuthController {
       const accessToken = setSessionCookies(res, user.id, session.id, session);
       return res.json({
         success: true,
-        accessToken,
+        ...(exposeClientToken(req) && { accessToken }),
         user: {
           id: user.id,
           email: user.email,
@@ -72,7 +80,12 @@ export class AuthController {
 
   static async refresh(req, res, next) {
     try {
-      const refreshToken = req.cookies?.mcr_refresh_token || req.body?.refreshToken;
+      const cookieToken = req.cookies?.mcr_refresh_token;
+      const payload = RefreshTokenSchema.safeParse(cookieToken ? { refreshToken: cookieToken } : (req.body ?? {}));
+      if (!payload.success) {
+        return res.status(401).json({ success: false, error: 'Invalid or expired refresh token' });
+      }
+      const { refreshToken } = payload.data;
       if (!refreshToken) {
         return res.status(401).json({ success: false, error: 'No refresh token provided' });
       }
@@ -91,7 +104,7 @@ export class AuthController {
 
       return res.json({
         success: true,
-        accessToken: newAccessToken
+        ...(exposeClientToken(req) && { accessToken: newAccessToken })
       });
     } catch (err) {
       return res.status(401).json({ success: false, error: 'Invalid or expired refresh token' });

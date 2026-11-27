@@ -114,6 +114,18 @@ export class CryptoService {
     return crypto.randomBytes(bytes).toString('hex');
   }
 
+  static signPlaybackToken({ stationId, programSession, userId, sessionId }) {
+    return jwt.sign({ stationId, programSession, sub: userId, sid: sessionId }, env.JWT_SECRET, {
+      algorithm: 'HS256', issuer: 'MCR_PRO', audience: 'mcr_playback', expiresIn: '1h'
+    });
+  }
+
+  static verifyPlaybackToken(token) {
+    return jwt.verify(token, env.JWT_SECRET, {
+      algorithms: ['HS256'], issuer: 'MCR_PRO', audience: 'mcr_playback'
+    });
+  }
+
   static signAgentToken(stationId, organizationId, generation) {
     return jwt.sign({ sub: stationId, organizationId, generation }, env.JWT_SECRET, {
       issuer: 'MCR_PRO', audience: 'mcr_agent', expiresIn: '90d'

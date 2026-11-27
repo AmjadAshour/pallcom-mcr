@@ -20,3 +20,7 @@ Priority order is security, continuity, integrity, correctness, performance, mai
 | 13 | Production readiness | Security, backup/restore, load and 1/8/24/72-hour soak evidence |
 
 Track implementation order and gating dependencies in [tasks](TASKS.md). Run a defensive review after each major phase.
+
+## Current governing specification
+
+The permanent [MASTER_REQUIREMENTS.md](../MASTER_REQUIREMENTS.md), [development plan](DEVELOPMENT_PLAN.md), and [current phase tracker](TASKS.md#current-master-specification-tracker) govern new work. The table above preserves the historical roadmap and does not grant approval to start a phase. Each phase requires explicit owner approval. The final redesign requires the separate Phase 17 gate.

@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@mcr/domain": "*",
-    "@mcr/obs-client": "*",
     "@mcr/shared": "*",
     "@mcr/validation": "*",
     "@prisma/client": "^5.14.0",

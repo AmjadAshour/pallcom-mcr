@@ -1,3 +1,4 @@
+import { reserveCreativeUpload } from '../src/infrastructure/program/creative-library.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { adLayer, transportAction, placementOrder, scheduledInstant } from '@mcr/shared';
@@ -60,4 +61,15 @@ test('time zone conversion rejects DST gaps and folds and retains UTC instants',
   assert.equal(scheduledInstant('2026-07-01T12:00', 'America/New_York'), Date.UTC(2026, 6, 1, 16));
   assert.throws(() => scheduledInstant('2026-03-08T02:30', 'America/New_York'));
   assert.throws(() => scheduledInstant('2026-11-01T01:30', 'America/New_York'));
+});
+
+
+test('creative upload reservation admits one preparation and releases capacity', () => {
+  const release = reserveCreativeUpload();
+  try {
+    assert.throws(reserveCreativeUpload, { statusCode: 409 });
+  } finally {
+    release();
+  }
+  reserveCreativeUpload()();
 });

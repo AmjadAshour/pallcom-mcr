@@ -2,6 +2,7 @@ export {
   categories as playoutCategories, emptyPlan as emptyPlayoutPlan, emptyState as emptyPlayoutState,
   projectTimeline, estimateNext, fixedEvents, pendingMain
 } from './playout-timeline.js';
+export { csvTextCell } from './csv.js';
 
 /**
  * PALLCOM MCR Shared Constants, Enums and Event Definitions

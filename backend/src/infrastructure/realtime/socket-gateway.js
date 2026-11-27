@@ -2,7 +2,8 @@ import { Server } from 'socket.io';
 import cookieParser from 'cookie-parser';
 import { CryptoService } from '../security/crypto-service.js';
 import { agentGateway } from '../agent/agent-gateway.js';
-import { ROLE_PERMISSIONS, SOCKET_EVENTS } from '@mcr/shared';
+import { SOCKET_EVENTS } from '@mcr/shared';
+import { hasPermission } from '../../presentation/middlewares/rbac.middleware.js';
 import { RepositoryFactory } from '../repositories/repository-factory.js';
 import { playoutEvents, stationPlayout } from '../playout/engine.js';
 import { env } from '../../config/env.js';
@@ -22,7 +23,7 @@ export function setupSocketGateway(httpServer, corsOrigin) {
       done(null, allowed);
     },
     cors: {
-      origin: corsOrigin,
+      origin: [corsOrigin],
       credentials: true
     }
   });
@@ -39,7 +40,9 @@ export function setupSocketGateway(httpServer, corsOrigin) {
     try {
       const decoded = CryptoService.verifyAccessToken(token);
       const user = sessionUser(decoded);
-      if (!user) return next(new Error('Authentication failed for WebSocket'));
+      if (!user || !hasPermission(user.role, 'station:read')) {
+        return next(new Error('Authentication failed for WebSocket'));
+      }
       socket.user = user;
       socket.session = decoded;
       next();
@@ -52,8 +55,6 @@ export function setupSocketGateway(httpServer, corsOrigin) {
     const orgRoom = `org:${socket.user.organizationId}`;
     socket.join(orgRoom);
 
-    const applicable = ROLE_PERMISSIONS[socket.user.role] || [];
-    const canRead = applicable.includes('*') || applicable.includes('station:read');
     let subscription = 0;
     let subscribedRoom;
     const expiry = setTimeout(() => socket.disconnect(true), Math.max(0, socket.session.exp * 1000 - Date.now()));
@@ -61,7 +62,7 @@ export function setupSocketGateway(httpServer, corsOrigin) {
     socket.on('playout:subscribe', async (stationId, ack) => {
       if (typeof ack !== 'function') return;
       if (!isCurrent(socket)) return ack({ error: 'Access denied' });
-      if (!canRead || typeof stationId !== 'string' || stationId.length > 100) return ack({ error: 'Access denied' });
+      if (typeof stationId !== 'string' || stationId.length > 100) return ack({ error: 'Access denied' });
       const version = ++subscription;
       try {
         const station = await RepositoryFactory.getStationRepository().findById(stationId, socket.user.organizationId);

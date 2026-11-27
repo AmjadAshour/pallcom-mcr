@@ -65,11 +65,11 @@ pipeline = Gst.parse_launch(
     "video/x-raw,width=320,height=180,framerate=2/1 ! jpegenc ! "
     "appsink name=program_monitor max-buffers=1 drop=true sync=false async=false "
     "composed. ! queue ! x264enc tune=zerolatency speed-preset=veryfast "
-    "bitrate=2500 key-int-max=25 bframes=0 ! h264parse config-interval=-1 ! queue ! mux. "
+    "bitrate=2500 key-int-max=25 bframes=0 ! h264parse config-interval=-1 ! tee name=encoded_video ! queue ! mux. "
     f"appsrc name=local_audio is-live=true format=time max-bytes=7680 caps=\"{audio}\" ! clocksync ! "
     f"volume name=program_volume ! {audio} ! tee name=program_sound "
     "program_sound. ! "
-    "audioconvert name=program_meter ! avenc_aac ! aacparse ! queue ! mux. "
+    "audioconvert name=program_meter ! avenc_aac ! aacparse ! tee name=encoded_audio ! queue ! mux. "
     "mpegtsmux name=mux alignment=7 ! tee name=delivery "
     f"delivery. ! queue ! udpsink name=output host=127.0.0.1 port={out_port} sync=false async=false "
     + ("delivery. ! queue leaky=downstream max-size-buffers=64 max-size-time=0 max-size-bytes=0 ! "
@@ -79,8 +79,10 @@ pipeline = Gst.parse_launch(
         f"appsink name=srt_{destination.id} max-buffers=32 drop=true sync=false async=false "
         for destination in srt_destinations
     )
-    + ("delivery. ! queue leaky=downstream max-size-buffers=64 ! "
-       "appsink name=hls_buffer max-buffers=64 drop=true sync=false async=false " if hls_path else "")
+    + ("encoded_video. ! queue leaky=downstream max-size-buffers=64 ! "
+       "appsink name=hls_video max-buffers=64 drop=true sync=false async=false "
+       "encoded_audio. ! queue leaky=downstream max-size-buffers=128 ! "
+       "appsink name=hls_audio max-buffers=128 drop=true sync=false async=false " if hls_path else "")
     + ("program_sound. ! queue leaky=downstream max-size-buffers=12 ! valve name=audio_monitor_gate drop=true ! "
        "audioconvert ! audioresample ! audio/x-raw,rate=32000,channels=2 ! "
        "lamemp3enc target=bitrate bitrate=96 cbr=true ! "
@@ -142,14 +144,20 @@ def push_transport(sink, destination):
     return Gst.FlowReturn.OK
 
 
+def push_hls_sample(sink, track):
+    sample = sink.emit("pull-sample")
+    graph = hls.graph
+    if sample and graph:
+        graph.get_by_name(track).emit("push-sample", sample)
+    return Gst.FlowReturn.OK
+
+
 def run_hls():
     graph = None
     try:
         graph = Gst.parse_launch(
-            'appsrc name=sender is-live=true format=time max-buffers=64 leaky-type=downstream '
-            'caps="video/mpegts,systemstream=true,packetsize=188" ! tsdemux name=d latency=0 '
-            'd. ! video/x-h264 ! queue ! h264parse ! segments.video '
-            'd. ! audio/mpeg,mpegversion=4 ! queue ! aacparse ! segments.audio '
+            'appsrc name=video is-live=true format=time handle-segment-change=true max-buffers=64 leaky-type=downstream ! segments.video '
+            'appsrc name=audio is-live=true format=time handle-segment-change=true max-buffers=128 leaky-type=downstream ! segments.audio '
             'hlssink2 name=segments playlist-length=5 max-files=7 target-duration=2 send-keyframe-requests=false'
         )
         segments = graph.get_by_name("segments")
@@ -174,7 +182,8 @@ def run_hls():
             elif time.monotonic() - started_at > 12:
                 hls.state = "failed"
                 break
-    except (GLib.Error, OSError, RuntimeError):
+    except (GLib.Error, OSError, RuntimeError) as error:
+        print(f"HLS packaging failed: {error}", file=sys.stderr, flush=True)
         hls.state = "failed"
     finally:
         hls_started.set()
@@ -590,7 +599,7 @@ def measure_program_audio(_pad, info):
 
 def open_input(feed):
     source_element = (
-        'souphttpsrc name=url_input is-live=true automatic-redirect=false retries=0 timeout=5 ! '
+        'souphttpsrc name=url_input is-live=true automatic-redirect=false ssl-strict=true http-log-level=none retries=0 timeout=5 ! '
         if feed.url else f'udpsrc address={input_host} port={feed.port} reuse=false ! '
     )
     graph = Gst.parse_launch(
@@ -606,7 +615,10 @@ def open_input(feed):
         'fakesink name=sound signal-handoffs=true sync=true async=false'
     )
     if feed.url:
-        graph.get_by_name("url_input").set_property("location", feed.url)
+        source = graph.get_by_name("url_input")
+        source.set_property("location", feed.url)
+        if initial.get("inputProxy"):
+            source.set_property("proxy", initial["inputProxy"])
     watch(graph, "picture", "video", feed)
     graph.get_by_name("sound").connect("handoff", capture_input_audio, feed)
     graph.set_state(Gst.State.PLAYING)
@@ -747,9 +759,10 @@ for destination in srt_destinations:
     sink.set_property("emit-signals", True)
     sink.connect("new-sample", push_transport, destination)
 if hls_path:
-    sink = pipeline.get_by_name("hls_buffer")
-    sink.set_property("emit-signals", True)
-    sink.connect("new-sample", push_transport, hls)
+    for track in ("video", "audio"):
+        sink = pipeline.get_by_name(f"hls_{track}")
+        sink.set_property("emit-signals", True)
+        sink.connect("new-sample", push_hls_sample, track)
 fade_image = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, False, 8, 1, 1)
 fade_image.fill(0x000000ff)
 fade_layer = pipeline.get_by_name("scene_fade")

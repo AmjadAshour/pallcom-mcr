@@ -1,7 +1,8 @@
 import { ROLES, ROLE_PERMISSIONS } from '@mcr/shared';
 
 export function hasPermission(role, permission) {
-  const permissions = ROLE_PERMISSIONS[role] || [];
+  if (!Object.hasOwn(ROLE_PERMISSIONS, role)) return false;
+  const permissions = ROLE_PERMISSIONS[role];
   return role === ROLES.SUPER_ADMIN || permissions.includes('*') || permissions.includes(permission);
 }
 
