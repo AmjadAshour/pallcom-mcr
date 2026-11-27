@@ -41,7 +41,9 @@ export MCR_PROGRAM_SRT_URL='' MCR_PROGRAM_SRT_PASSPHRASE=''
 "${compose[@]}" config --quiet
 "${compose[@]}" up --build -d
 "${compose[@]}" exec -T web nginx -t
-if [[ -n "$("${compose[@]}" port server 4000 2>/dev/null || true)" ]]; then
+server_container="$("${compose[@]}" ps -q server)"
+[[ -n "$server_container" ]]
+if [[ "$(docker inspect --format '{{len .HostConfig.PortBindings}}' "$server_container")" != 0 ]]; then
   echo 'The API container must stay behind the gateway'
   exit 1
 fi
