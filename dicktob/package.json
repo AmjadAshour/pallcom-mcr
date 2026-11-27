@@ -15,6 +15,6 @@
     "@mcr/validation": "*"
   },
   "devDependencies": {
-    "electron": "^30.0.9"
+    "electron": "45.5.0"
   }
 }

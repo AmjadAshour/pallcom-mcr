@@ -3,7 +3,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes, X509Certificate } from 'node:crypto';
 import { once } from 'node:events';
 import { finished } from 'node:stream/promises';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { createServer as createPortReservation, request as httpRequest } from 'node:http';
 import { createServer, request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
@@ -258,7 +258,13 @@ try {
   assert.equal(revoke.status, 200);
   await waitFor('Agent revocation', () => agentOutput.includes('Agent credentials or station are no longer valid'));
   if (realObs) {
+    const agentDirectory = await stat(join(directory, 'agent'));
+    const agentCredentialFile = await stat(join(directory, 'agent', 'credentials.json'));
+    assert.equal(agentDirectory.mode & 0o777, 0o700);
+    assert.equal(agentCredentialFile.mode & 0o777, 0o600);
+    assert.equal(agentCredentialFile.uid, process.getuid());
     console.log('Real Agent pairing, WSS, scene read and revocation passed with OBS Studio', realObs.version.obsVersion);
+    console.log('Linux Agent keystore ownership and private modes passed');
   } else {
     console.log('Real Agent CLI pairing, WSS, scene read and revocation passed with simulated OBS');
   }

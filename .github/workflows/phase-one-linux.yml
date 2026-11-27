@@ -51,20 +51,22 @@ jobs:
       - name: Download public advisories and scan without network access
         run: bash backend/verification/offline-npm-advisories.sh
 
-  desktop-lockfile-candidate:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
+  desktop-runtime:
+    runs-on: windows-2025
+    timeout-minutes: 10
     steps:
       - name: Check out the public review commit
+        shell: bash
         run: |
           git init .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
           git checkout --detach FETCH_HEAD
-      - name: Resolve the supported Electron lockfile without lifecycle scripts or audit requests
+      - name: Verify the pinned Electron runtime and renderer isolation
+        shell: bash
         run: |
-          npm install --workspace @mcr/desktop --save-dev --save-exact electron@45.5.0 --package-lock-only --ignore-scripts --no-audit --no-fund
-          git diff --check -- dicktob/package.json package-lock.json
-          printf 'DESKTOP_LOCKFILE_PATCH='
-          git diff --binary -- dicktob/package.json package-lock.json | gzip -c | base64 -w0
-          printf '\n'
+          npm ci --no-audit --no-fund
+          npm run build:web
+          npm test
+          npm exec --workspace @mcr/desktop -- install-electron
+          node backend/verification/desktop-loopback.js
