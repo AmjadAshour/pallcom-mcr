@@ -107,12 +107,22 @@ legacy_root=("${container[@]}" --user 0:0 --mount "type=volume,src=$legacy_volum
 legacy_read_only=(--mount "type=volume,src=$legacy_volume,dst=/legacy,readonly")
 restored_mount=(--mount "type=volume,src=$restored_volume,dst=/restored")
 restricted=("${container[@]}" --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges)
+export MCR_RESTORE_TEST_PASSWORD="$(openssl rand -hex 32)"
 "${legacy_root[@]}" -i -e NODE_ENV=test -e STORAGE_MODE=sqlite -e SQLITE_DB_PATH=/legacy/mcr_local.db \
+  -e MCR_RESTORE_TEST_PASSWORD \
   "$media_image" sh -ec 'umask 077; chmod 0700 /legacy; node --input-type=module' <<'JS'
 import { getSqliteDatabase } from './backend/src/infrastructure/database/sqlite.js';
 import { SqliteStationRepository } from './backend/src/infrastructure/repositories/sqlite-station-repository.js';
+import { SqliteUserRepository } from './backend/src/infrastructure/repositories/sqlite-user-repository.js';
+import { CryptoService } from './backend/src/infrastructure/security/crypto-service.js';
 const stations = new SqliteStationRepository();
 await stations.create({ id: 'fixture', name: 'Before restore', organizationId: 'fixture-org' });
+await stations.create({ id: 'foreign-fixture', name: 'Foreign station', organizationId: 'foreign-org' });
+await new SqliteUserRepository().create({
+  id: 'restored-fixture-user', email: 'restore-fixture@example.invalid', fullName: 'Restore fixture',
+  organizationId: 'fixture-org', role: 'VIEWER',
+  passwordHash: await CryptoService.hashPassword(process.env.MCR_RESTORE_TEST_PASSWORD)
+});
 getSqliteDatabase().close();
 JS
 legacy_digest=$("${container[@]}" --user 0:0 "${legacy_read_only[@]}" "$media_image" sha256sum /legacy/mcr_local.db)
@@ -146,6 +156,11 @@ try {
   db.close();
 }
 JS
+for pass in 1 2; do
+  "${restricted[@]}" "${restored_mount[@]}" -e JWT_SECRET -e REFRESH_TOKEN_SECRET -e ENCRYPTION_MASTER_KEY \
+    -e MCR_RESTORE_TEST_PASSWORD "$media_image" timeout -k 5s 25s \
+    node backend/verification/restored-sqlite-api.js /restored/mcr_local.db "$pass"
+done
 [[ "$legacy_digest" == "$("${container[@]}" --user 0:0 "${legacy_read_only[@]}" "$media_image" sha256sum /legacy/mcr_local.db)" ]]
 echo 'Linux Compose SQLite permission rehearsal passed with unchanged source'
 
