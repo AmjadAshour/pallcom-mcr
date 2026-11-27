@@ -4,6 +4,9 @@ set -euo pipefail
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 fixture="$(mktemp -d)"
 project="mcrphaseone$(basename "$fixture" | tr -cd '[:alnum:]' | tr '[:upper:]' '[:lower:]')"
+legacy_volume="${project}_legacy_sqlite"
+restored_volume="${project}_restored_sqlite"
+created_volumes=()
 port=18443
 compose=(docker compose -p "$project"
   -f "$repo_dir/backend/infrastructure/docker/docker-compose.yml"
@@ -18,6 +21,9 @@ cleanup() {
     "${compose[@]}" logs --tail=40 || true
   fi
   "${compose[@]}" down --volumes --timeout 5
+  for volume in "${created_volumes[@]}"; do
+    docker volume rm "$volume" >/dev/null
+  done
 }
 trap cleanup EXIT
 
@@ -87,6 +93,61 @@ echo 'Linux Compose TLS, security headers, application gateway and legacy IPTV d
 
 media_image="$("${compose[@]}" images -q server)"
 [[ -n "$media_image" ]]
+
+for volume in "$legacy_volume" "$restored_volume"; do
+  if docker volume inspect "$volume" >/dev/null 2>&1; then
+    echo 'Refusing to reuse a fixture volume'
+    exit 1
+  fi
+  docker volume create "$volume" >/dev/null
+  created_volumes+=("$volume")
+done
+container=(docker run --rm --network none)
+legacy_root=("${container[@]}" --user 0:0 --mount "type=volume,src=$legacy_volume,dst=/legacy")
+legacy_read_only=(--mount "type=volume,src=$legacy_volume,dst=/legacy,readonly")
+restored_mount=(--mount "type=volume,src=$restored_volume,dst=/restored")
+restricted=("${container[@]}" --user 1000:1000 --cap-drop ALL --security-opt no-new-privileges)
+"${legacy_root[@]}" -i -e NODE_ENV=test -e STORAGE_MODE=sqlite -e SQLITE_DB_PATH=/legacy/mcr_local.db \
+  "$media_image" sh -ec 'umask 077; chmod 0700 /legacy; node --input-type=module' <<'JS'
+import { getSqliteDatabase } from './backend/src/infrastructure/database/sqlite.js';
+const db = getSqliteDatabase();
+db.prepare('INSERT INTO stations (id, name, organizationId) VALUES (?, ?, ?)').run('fixture', 'Before restore', 'fixture-org');
+db.close();
+JS
+legacy_digest=$("${container[@]}" --user 0:0 "${legacy_read_only[@]}" "$media_image" sha256sum /legacy/mcr_local.db)
+"${restricted[@]}" -i "${legacy_read_only[@]}" "$media_image" node --input-type=module <<'JS'
+import assert from 'node:assert/strict';
+import { accessSync } from 'node:fs';
+assert.throws(() => accessSync('/legacy/mcr_local.db'), { code: 'EACCES' });
+JS
+"${container[@]}" --user 0:0 "${legacy_read_only[@]}" "${restored_mount[@]}" "$media_image" sh -ec '
+  node backend/scripts/sqlite-recovery.js restore /legacy/mcr_local.db /restored/mcr_local.db
+  chown 1000:1000 /restored /restored/mcr_local.db
+  chmod 0700 /restored
+'
+"${restricted[@]}" -i "${restored_mount[@]}" "$media_image" node --input-type=module <<'JS'
+import assert from 'node:assert/strict';
+import { existsSync, statSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+const path = '/restored/mcr_local.db';
+const { uid, gid, mode } = statSync(path);
+assert.deepEqual([uid, gid, mode & 0o777], [1000, 1000, 0o600]);
+const db = new DatabaseSync(path);
+try {
+  assert.equal(db.prepare('PRAGMA journal_mode=WAL').get().journal_mode, 'wal');
+  const station = db.prepare('SELECT name, organizationId FROM stations WHERE id=?');
+  assert.deepEqual({ ...station.get('fixture') }, { name: 'Before restore', organizationId: 'fixture-org' });
+  assert.equal(db.prepare('UPDATE stations SET name=? WHERE id=?').run('After restore', 'fixture').changes, 1);
+  assert.equal(station.get('fixture').name, 'After restore');
+  assert(existsSync(path + '-wal'));
+  assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+} finally {
+  db.close();
+}
+JS
+[[ "$legacy_digest" == "$("${container[@]}" --user 0:0 "${legacy_read_only[@]}" "$media_image" sha256sum /legacy/mcr_local.db)" ]]
+echo 'Linux Compose SQLite permission rehearsal passed with unchanged source'
+
 docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
   --user 1000:1000 -e MCR_PROGRAM_PYTHON=/usr/bin/python3 "$media_image" \
   sh -ec 'node --version

@@ -99,3 +99,4 @@ The following evidence is limited to isolated fixtures. [Security release gates]
 | Gate | State | Acceptance check |
 | --- | --- | --- |
 | G64 Restricted API and worker identity in Compose | VERIFIED_COMPLETE | Linux CI on a fresh disposable volume verified UID/GID 1000, zero effective capabilities, no-new-privileges, and writable, owner-only SQLite and HLS paths. The TLS gateway and independent media regressions passed. Existing-volume migration and deployed identities remain in G51. [Test evidence](TEST_REPORT.md#restricted-linux-compose-verification) |
+| G65 Existing SQLite volume permission rehearsal | IN_PROGRESS | Seed a root-owned disposable volume and confirm the restricted identity cannot read it. Restore a verified copy into a separate volume, assign only the copy to UID/GID 1000, then verify record preservation, SQLite writes and WAL creation. Compare the read-only source before and after. |
