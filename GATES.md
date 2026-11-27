@@ -262,3 +262,12 @@ SCENEUPLOAD01 and SCENEUPLOAD02 passed direct verification. The web build passed
   EVIDENCE: pending loopback verification
 
 VIDEOINPUT01 and VIDEOINPUT02 passed direct verification. The local browser loaded a different clip in muted preview while Program remained on the existing scene. The isolated receiver decoded the direct take without a session change. Formal runner evidence remains pending.
+
+### Operator interface cleanup
+
+- [x] UICLEAN01: Restricted links are absent from the sidebar for operators without the matching permissions, and the hard-coded identity is removed.
+  EVIDENCE: Source review verified session permissions, the wildcard administrator path, and removal of the static identity.
+- [x] UICLEAN02: The OBS graphics forms show actions only when they apply, and published previews and setup instructions occupy space only on demand or when relevant.
+  EVIDENCE: Source review covered empty, edited, saved, active, hidden and expired items, and verified the existing handlers remain reachable.
+- [x] UICLEAN03: The frontend builds and its existing tests pass.
+  EVIDENCE: Direct production build passed and both frontend tests passed.
