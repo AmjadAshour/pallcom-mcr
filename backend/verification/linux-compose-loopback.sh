@@ -8,6 +8,7 @@ port=18443
 compose=(docker compose -p "$project"
   -f "$repo_dir/backend/infrastructure/docker/docker-compose.yml"
   -f "$repo_dir/backend/infrastructure/docker/docker-compose.iptv.yml"
+  -f "$repo_dir/backend/infrastructure/docker/docker-compose.restricted.yml"
   -f "$fixture/ports.yml")
 
 cleanup() {
@@ -62,6 +63,19 @@ if [[ "$ready" != true ]]; then
   echo 'Linux Compose did not return the expected 401 from the application'
   exit 1
 fi
+"${compose[@]}" exec -T server sh -ec '
+  test "$(id -u):$(id -g)" = 1000:1000
+  grep -Eq "^CapEff:[[:space:]]+0+$" /proc/1/status
+  grep -Eq "^NoNewPrivs:[[:space:]]+1$" /proc/1/status
+  sqlite=/app/backend/database/sqlite
+  for directory in "$sqlite" /tmp/mcr-hls; do
+    test "$(stat -c "%u:%g %a" "$directory")" = "1000:1000 700"
+    probe="$(mktemp "$directory/.permission-probe.XXXXXX")"
+    rm -f "$probe"
+  done
+  test -s "$sqlite/mcr_local.db"
+'
+echo 'Linux Compose API identity, capability drop, private SQLite and HLS mounts passed'
 "${request[@]}" --fail --dump-header "$fixture/headers" --output /dev/null "$MCR_PUBLIC_ORIGIN/"
 grep -qi '^content-security-policy:' "$fixture/headers"
 grep -qi '^strict-transport-security:' "$fixture/headers"

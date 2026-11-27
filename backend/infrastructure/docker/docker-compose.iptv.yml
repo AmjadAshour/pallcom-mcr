@@ -14,7 +14,7 @@ services:
       MCR_PROGRAM_SRT_PASSPHRASE: ${MCR_PROGRAM_SRT_PASSPHRASE:-}
 
     tmpfs:
-      - /tmp/mcr-hls:size=64m,mode=0700
+      - /tmp/mcr-hls:size=64m,mode=0700,uid=1000,gid=1000
 
   web:
     depends_on:

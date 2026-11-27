@@ -17,6 +17,9 @@ COPY backend/packages/obs-client/package.json ./backend/packages/obs-client/
 RUN npm ci --no-audit --omit=dev --workspace=@mcr/server --workspace=@mcr/shared --workspace=@mcr/domain --workspace=@mcr/validation --workspace=@mcr/obs-client
 
 COPY backend ./backend
+RUN mkdir -p backend/database/sqlite \
+    && chown node:node backend/database/sqlite \
+    && chmod 0700 backend/database/sqlite
 
 EXPOSE 4000
 CMD ["node", "backend/src/index.js"]

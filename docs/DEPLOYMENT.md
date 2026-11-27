@@ -29,3 +29,11 @@ For staging sign-off, verify that the proxy port is loopback-only, that the medi
 ## Intended production topology
 
 The proposed two-channel Linux architecture and MySQL qualification are in [the deployment plan](DEPLOYMENT_PLAN.md). Existing deployments must preserve their storage identity. Use the [rollback plan](UPDATE_AND_ROLLBACK_PLAN.md) and the updated [IPTV instructions](IPTV_DEPLOYMENT.md) before changing the gateway.
+
+## Restricted Linux Compose runtime
+
+For an authorized staging deployment, append `backend/infrastructure/docker/docker-compose.restricted.yml` to the existing Compose file list. It starts the API and its media child processes as UID and GID 1000, drops Linux capabilities and prevents privilege escalation. The stock server image prepares the SQLite directory with owner-only permissions. The IPTV overlay mounts the HLS workspace as a 64 MiB private tmpfs owned by the same user. The gateway keeps its existing configuration.
+
+Use a fresh named SQLite volume for the first rehearsal. An existing volume retains its ownership and permissions. Confirm access under the service identity against a separately restored backup before enabling this overlay on an installation with data. The database, its parent directory and SQLite journal files must be writable by that identity. Avoid recursive ownership changes on a running installation. Verify a working TLS gateway, successful login and an independent audio/video receiver before accepting the service change.
+
+To roll back during the approved window, remove the restricted overlay from the Compose file list and recreate only the affected API service using the previous deployment definition and the same volume. Never remove the volume as part of this rollback. If restoring a backup, use the reviewed recovery procedure and reconcile authorization changes made after the snapshot. Do not put a failed identity rollout into production.

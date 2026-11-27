@@ -95,3 +95,7 @@ The following evidence is limited to isolated fixtures. [Security release gates]
 | G62 Graphics link lifecycle | VERIFIED_COMPLETE | Isolated API fixture checks expiry, token rotation, cross-organization denial, revocation and Referrer-Policy. Legacy links retain their identity pending scheduled rotation. Platform log verification remains G4. |
 | G63 Private UDP admission | VERIFIED_COMPLETE | Private UDP without opt-in was rejected in the media fixture. Loopback playback and media isolation passed. Assigned LAN interface and firewall restrictions require staged verification. |
 | G56 Windows native failure follow-up | FAILED_VERIFICATION | The corrected Linux image passed HLS playback and shutdown. Four Windows negative controls returned the expected exit 1 without a libuv assertion. A normal Windows run timed out during receiver decoding. The earlier native crash remains unexplained. [Latest evidence](TEST_REPORT.md#windows-hls-repeatability-follow-up) |
+
+| Gate | State | Acceptance check |
+| --- | --- | --- |
+| G64 Restricted API and worker identity in Compose | IN_PROGRESS | Run the restricted overlay on a fresh disposable volume. Verify effective UID/GID 1000, zero effective capabilities, no privilege escalation, writable private SQLite and HLS paths, and successful TLS gateway and independent media regressions. Existing-volume migration and deployed identities remain in G51. |
