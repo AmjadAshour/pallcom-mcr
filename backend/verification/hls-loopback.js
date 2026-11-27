@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdirSync, mkdtempSync, readdirSync, rmdirSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -21,6 +22,7 @@ Object.assign(process.env, {
   MCR_PROGRAM_SECOND_SRT_URL:'', MCR_PROGRAM_SECOND_SRT_PASSPHRASE:'', MCR_PROGRAM_HLS_DIR:directory,
 });
 const { server } = await import('../src/index.js');
+const { getSqliteDatabase } = await import('../src/infrastructure/database/sqlite.js');
 const { RepositoryFactory: repo } = await import('../src/infrastructure/repositories/repository-factory.js');
 const { CryptoService } = await import('../src/infrastructure/security/crypto-service.js');
 const { createSession, revokeSession } = await import('../src/infrastructure/security/session-service.js');
@@ -100,6 +102,9 @@ function assertPrivacy(response) {
   assert.equal(response.headers.get('cache-control'), 'private, no-store');
   assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
 }
+let verified = false;
+let stopped = false;
+let fixtureError;
 try {
   process.env.MCR_PROGRAM_INPUT_HOST = '192.0.2.1';
   process.env.MCR_PROGRAM_TRUST_PRIVATE_UDP = '0';
@@ -222,13 +227,36 @@ try {
   assert.notEqual(failed.session, session);
   const previous = udp.videoBytes;
   await until('UDP continues with an unavailable HLS destination', () => udp.videoBytes > previous + 90);
-  console.log('HLS receiver and output isolation passed');
+  verified = true;
+} catch (error) {
+  fixtureError = error;
 } finally {
   const receivers = Promise.all([closeReceiver(hls?.child), closeReceiver(udp.child)]);
-  await program('stop');
-  proxy.closeAllConnections();
-  await new Promise(resolve => proxy.close(resolve));
-  server.closeAllConnections();
-  await new Promise(resolve => server.close(resolve));
-  await receivers;
+  try {
+    await program('stop');
+    stopped = true;
+  } catch (error) {
+    fixtureError ??= error;
+  }
+  try {
+    proxy.closeAllConnections();
+    server.closeAllConnections();
+    await Promise.all([
+      new Promise(resolve => proxy.close(resolve)),
+      new Promise(resolve => server.close(resolve)),
+      receivers
+    ]);
+    getSqliteDatabase().close();
+    if (verified && stopped) {
+      await rm(directory, { recursive:true, force:true, maxRetries:5, retryDelay:100 });
+    }
+  } catch (error) {
+    fixtureError ??= error;
+  }
+}
+if (fixtureError) {
+  console.error('HLS fixture failed:', fixtureError.message);
+  process.exitCode = 1;
+} else {
+  console.log('HLS receiver and output isolation passed');
 }

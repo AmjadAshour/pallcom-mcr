@@ -9,6 +9,11 @@ Scope: Verify local remediation and revise the proposed roadmap while preserving
   EXPECT: # fail 0
   EVIDENCE: pending
 
+- [ ] P1-HLS-NODE22: The synthetic HLS receiver reaches the success marker after closing its worker, receivers and SQLite fixture on Node 22
+  CHECK: node backend/verification/hls-loopback.js
+  EXPECT: HLS receiver and output isolation passed
+  EVIDENCE: pending
+
 - [ ] P1-WEB: Vite produces production assets
   CHECK: npm run build:web
   EXPECT: built in
@@ -65,3 +70,5 @@ Execution records are in [the test report](TEST_REPORT.md). [Release-gate status
 
 - [ ] P1-OSV-OFFLINE: Compare the dependency lockfile with a locally downloaded public advisory database and triage the results
   EVIDENCE: pending
+- [ ] P1-LINUX-CI: Debian Node 22 media image and Linux Compose Nginx pass isolated playback and ingress checks
+  EVIDENCE: pending GitHub Actions run

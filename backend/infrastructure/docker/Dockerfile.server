@@ -14,7 +14,7 @@ COPY backend/packages/domain/package.json ./backend/packages/domain/
 COPY backend/packages/validation/package.json ./backend/packages/validation/
 COPY backend/packages/obs-client/package.json ./backend/packages/obs-client/
 
-RUN npm ci --omit=dev --workspace=@mcr/server --workspace=@mcr/shared --workspace=@mcr/domain --workspace=@mcr/validation --workspace=@mcr/obs-client
+RUN npm ci --no-audit --omit=dev --workspace=@mcr/server --workspace=@mcr/shared --workspace=@mcr/domain --workspace=@mcr/validation --workspace=@mcr/obs-client
 
 COPY backend ./backend
 

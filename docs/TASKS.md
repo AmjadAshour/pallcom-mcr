@@ -76,3 +76,5 @@ The follow-up isolated checks passed for signed HLS station and session scope, S
 Actual Windows Nginx loopback verified protected route forwarding and suppression of sensitive URLs after correcting gateway location handling. G4 and G51 still require authorized Linux deployment evidence. [Nginx test results](TEST_REPORT.md#actual-nginx-ingress-on-windows-loopback)
 
 The actual Nginx fixture now also passes production-mode application authentication, Chromium CSP and authenticated WSS, foreign-origin denial, and real Agent pairing through its OBS simulator. [Application and Agent evidence](TEST_REPORT.md#actual-nginx-with-the-application-and-agent)
+
+The Windows Node 22 compatibility checks passed the regression suite, application ingress and three sequential HLS fixture runs. The merged application can now be compared on the same Node major version used by Render. Linux and the native failure investigation remain pending. [Node 22 verification](TEST_REPORT.md#node-22-runtime-compatibility-and-hls-fixture-cleanup)

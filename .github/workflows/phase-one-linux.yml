@@ -1,0 +1,21 @@
+name: Phase One isolated Linux verification
+
+on:
+  push:
+    branches: [codex/phase-one-linux-verification]
+
+permissions: {}
+
+jobs:
+  linux-loopback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the public review commit
+        run: |
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Verify Linux Compose and isolated media
+        run: bash backend/verification/linux-compose-loopback.sh
