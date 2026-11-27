@@ -62,11 +62,18 @@ jobs:
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
           git checkout --detach FETCH_HEAD
-      - name: Verify the pinned Electron runtime and renderer isolation
+      - name: Install Windows workspace dependencies
         shell: bash
-        run: |
-          npm ci --no-audit --no-fund
-          npm run build:web
-          npm test
-          npm exec --workspace @mcr/desktop -- install-electron
-          node backend/verification/desktop-loopback.js
+        run: npm ci --no-audit --no-fund
+      - name: Build the Windows frontend
+        shell: bash
+        run: npm run build:web
+      - name: Run Windows workspace tests
+        shell: bash
+        run: npm test
+      - name: Install the pinned Electron runtime
+        shell: bash
+        run: npm exec --workspace @mcr/desktop -- install-electron
+      - name: Verify Electron renderer isolation and IPC
+        shell: bash
+        run: node backend/verification/desktop-loopback.js
