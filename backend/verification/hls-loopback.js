@@ -63,8 +63,8 @@ function receiver(url, auth) {
     ['-headers','Authorization: Bearer ' + auth + '\r\n','-live_start_index','-1'] : []),
   '-analyzeduration','400000','-probesize','32768','-i',url,'-map','0:v','-vf','scale=1:1','-pix_fmt','rgb24',
   '-f','rawvideo','pipe:1','-map','0:a','-f','s16le','pipe:3'],
-  { windowsHide:true, stdio:['ignore','pipe','pipe','pipe'] });
-  const sample = { child, videoBytes:0, audioBytes:0, blue:false, error:'' };
+  { windowsHide:true, stdio:['ignore','pipe','ignore','pipe'] });
+  const sample = { child, videoBytes:0, audioBytes:0, blue:false };
   child.once('exit', (code, signal) => {
     if (child.killed || code === 0) return;
     console.error(auth || url.startsWith('http') ? 'HLS receiver exited' : 'UDP receiver exited', { code, signal });
@@ -80,13 +80,18 @@ function receiver(url, auth) {
     remainder = pixels.subarray(end);
   });
   child.stdio[3].on('data', bytes => { sample.audioBytes += bytes.length; });
-  child.stderr.setEncoding('utf8').on('data', chunk => { sample.error = (sample.error + chunk).slice(-2048); });
   return sample;
 }
 async function until(label, pass) {
   const deadline = Date.now() + 22000;
   while (!await pass()) {
-    if (Date.now() > deadline) throw Error(label + ': ' + JSON.stringify(await program()) + ' ' + (hls?.error ?? ''));
+    if (Date.now() > deadline) {
+      const { state, source, hls: hlsState } = await program();
+      const describeReceiver = ({ videoBytes, audioBytes, blue }) => ({ videoBytes, audioBytes, blue });
+      throw Error(label + ': ' + JSON.stringify({
+        state, source, hlsState, udp: describeReceiver(udp), hls: hls && describeReceiver(hls)
+      }));
+    }
     await sleep(160);
   }
   console.log(label);

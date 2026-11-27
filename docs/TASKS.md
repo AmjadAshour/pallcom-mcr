@@ -63,13 +63,13 @@ An explicit owner approval is required to start each numbered phase. The depende
 | Real OBS based acceptance | VERIFIED_COMPLETE | Genuine OBS and Agent read-only integration in an isolated Linux container, G50. |
 | MySQL application verification | BLOCKED | MySQL runtime repositories and session/Program persistence are unwired and remain Phase 15 scope, G48. |
 | npm advisory scan and isolated target install | VERIFIED_COMPLETE | Offline OSV reported zero findings after upgrades. Linux Compose built project dependencies and Windows tested a clean installation and actual Electron, G18 and G55. |
-| Reproducible Windows HLS fixture stability | PARTIAL | Linux HLS passed with bounded cleanup. The intentionally missing-worker scenario recovered its normal failure status. The original intermittent Windows event remains unresolved, G56. |
+| Reproducible Windows HLS fixture stability | PARTIAL | Linux HLS passed with bounded cleanup. Four Windows missing-worker controls returned the expected exit status. A normal Windows run intermittently timed out at receiver decoding. The original native exit remains unresolved, G56. [Windows evidence](TEST_REPORT.md#windows-hls-repeatability-follow-up) |
 
 The [evidence ledger](PHASE_ONE_GATES.md) holds individual controls, regression results and blockers. Offline Phase Two development is technically possible with synthetic SQLite and generated keys. Phase One acceptance and explicit owner approval remain the prerequisites for commencing it under the current plan.
 
 ## Phase One post-audit checkpoint
 
-Phase One remains active. The Phase Two and Phase 17–18 approvals remain gated. [Post-audit security release gates](SECURITY_RELEASE_GATES.md) distinguish local remediation from deployment acceptance. [Proposed dependency order](DEVELOPMENT_PLAN.md#proposed-post-audit-execution-order) introduces no new approved implementation phase. Keep G56 open for Windows native diagnostics and Linux parity.
+Phase One remains active. The Phase Two and Phase 17–18 approvals remain gated. [Post-audit security release gates](SECURITY_RELEASE_GATES.md) distinguish local remediation from deployment acceptance. [Proposed dependency order](DEVELOPMENT_PLAN.md#proposed-post-audit-execution-order) introduces no new approved implementation phase. Keep G56 open for the unresolved Windows native exit and receiver repeatability.
 
 The follow-up isolated checks passed for signed HLS station and session scope, SQLite restoration of graphics revocation state, and rekey of a disposable copy. See [the verification report](TEST_REPORT.md#follow-up-verification-for-stream-scope-and-recovery). [Restore procedures](UPDATE_AND_ROLLBACK_PLAN.md) require reconciliation of security changes after a snapshot before traffic is restored.
 
