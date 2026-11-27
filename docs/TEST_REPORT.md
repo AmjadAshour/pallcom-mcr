@@ -288,3 +288,9 @@ The same run built the production frontend using Vite 6.4.6 and completed Linux 
 ### Disposable credential cutover rehearsal
 
 `node backend/verification/credential-cutover-loopback.js` exited 0. A production-mode API started on loopback with synthetic signing keys and SQLite. A second process opened the same disposable database with newly generated signing keys. Old access and refresh tokens returned 401 after restart. Fresh login retained the account identifier and issued a working token. `node backend/verification/sqlite-recovery.js` and `node backend/verification/sqlite-rekey.js` also exited 0. A real credential cutover still requires owner authorization, a scheduled window and recovery sign-off.
+
+### Consolidated CI verification
+
+[Run 45988476377](https://github.com/AmjadAshour/pallcom-mcr/actions/runs/45988476377) passed all four jobs for code commit `352418d`. The Linux job verified that the API container had zero published host port bindings, then passed Nginx TLS, HLS/UDP failure isolation, audio authorization and the disposable signing-key cutover. The real OBS Studio 29.0.2 job passed pairing, scene reads, revocation, Linux keystore owner/mode checks and orderly server shutdown. Windows passed the Vite 6.4.6 production build, all 39 workspace tests and the Electron 45.5.0 renderer/IPC check. Offline OSV loaded the public npm archive and found zero matches in 426 records. The earlier gateway comparison failure came from interpreting the Compose port command's output as a published binding. The passing run used the Docker host port-binding map.
+
+Operational staging approval still requires the intended environment, accepted source and receiver fixtures, service identities, backup access and log validation. Production rotation requires the affected services, an approved maintenance window and recovery sign-off. CI used generated data and did not exercise a live station or an operational credential.

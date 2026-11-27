@@ -60,10 +60,10 @@ An explicit owner approval is required to start each numbered phase. The depende
 | Offline package inventory | VERIFIED_COMPLETE | Lockfile integrity metadata and installed tree inspection, G55. Advisory status requires a separate scan. |
 | Actual rotation and recovery sign-off | BLOCKED | Approve a maintenance window, credential scope and rollback owner, G8. |
 | Public TLS, Nginx/Render parity, egress, logs, ACLs and runtime privilege | BLOCKED | Supply an authorized representative staging deployment and permitted source/output fixtures, G4 and G51. |
-| Real OBS based acceptance | BLOCKED | Provide an isolated VM or approved firewall isolation for the portable OBS fixture, G50. |
+| Real OBS based acceptance | VERIFIED_COMPLETE | Genuine OBS and Agent read-only integration in an isolated Linux container, G50. |
 | MySQL application verification | BLOCKED | MySQL runtime repositories and session/Program persistence are unwired and remain Phase 15 scope, G48. |
-| Dependency advisory scan and clean target install | BLOCKED | Provide an approved advisory source and a clean target environment for npm/optional binary reconciliation, G18 and G55. |
-| Reproducible Windows HLS fixture stability | FAILED_VERIFICATION | The fallback and independent receiver passed on a standalone run. An intermittent Windows exit remains unresolved, G56. |
+| npm advisory scan and isolated target install | VERIFIED_COMPLETE | Offline OSV reported zero findings after upgrades. Linux Compose built project dependencies and Windows tested a clean installation and actual Electron, G18 and G55. |
+| Reproducible Windows HLS fixture stability | PARTIAL | Linux HLS passed with bounded cleanup. The intentionally missing-worker scenario recovered its normal failure status. The original intermittent Windows event remains unresolved, G56. |
 
 The [evidence ledger](PHASE_ONE_GATES.md) holds individual controls, regression results and blockers. Offline Phase Two development is technically possible with synthetic SQLite and generated keys. Phase One acceptance and explicit owner approval remain the prerequisites for commencing it under the current plan.
 
@@ -79,6 +79,8 @@ The actual Nginx fixture now also passes production-mode application authenticat
 
 The Windows Node 22 compatibility checks passed the regression suite, application ingress and three sequential HLS fixture runs. The merged application can now be compared on the same Node major version used by Render. Linux and the native failure investigation remain pending. [Node 22 verification](TEST_REPORT.md#node-22-runtime-compatibility-and-hls-fixture-cleanup)
 
-G18's offline npm scan ran in GitHub Actions with network access disabled during matching. The package findings remain open, including Electron's desktop runtime and the Vite toolchain. Vite now defaults to loopback and the patched Vite lockfile remains pending. [Dependency scan and mitigation](TEST_REPORT.md#offline-npm-dependency-scan-in-the-isolated-github-job)
+G18's offline npm scan ran in GitHub Actions with network access disabled during matching. Upgrades to Vite, esbuild and Electron removed the reported matches. Vite defaults to loopback. The updated Electron window passed renderer and IPC checks. [Dependency scan and mitigation](TEST_REPORT.md#offline-npm-dependency-scan-in-the-isolated-github-job)
 
 Linux CI verified Compose image builds, real Nginx over local TLS, the API gateway, legacy IPTV denial and HLS/UDP playback with failure isolation. The first Linux run timed out in fixture teardown before the audio fixture. The bounded cleanup change requires a repeat on Linux. [Linux CI evidence](TEST_REPORT.md#linux-compose-and-media-ci)
+
+The consolidated follow-up passed all four isolated CI jobs. The open operational items are the original Windows intermittent cause, production-equivalent staging controls and the owner-authorized credential cutover. [Final isolated run](TEST_REPORT.md#consolidated-ci-verification)
