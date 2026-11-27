@@ -1,0 +1,6 @@
+ARG FIXTURE_IMAGE=mcr-phase-one-worker
+FROM ${FIXTURE_IMAGE}
+
+RUN apt-get -o Acquire::Retries=2 update \
+    && apt-get install -y --no-install-recommends obs-studio obs-plugins xvfb xauth libgl1-mesa-dri openssl \
+    && rm -rf /var/lib/apt/lists/*

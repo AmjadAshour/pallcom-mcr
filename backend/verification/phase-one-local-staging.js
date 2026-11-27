@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url';
 import WebSocket, { WebSocketServer } from 'ws';
 import { decode, encode } from '@msgpack/msgpack';
 import { startFixtureNginx } from './nginx-fixture.js';
+import { startDisposableObs } from './start-disposable-obs.js';
+import { closeFixtureProcess } from './close-fixture-process.js';
 
 const directory = await mkdtemp(join(tmpdir(), 'mcr-phase-one-tls-'));
 const keyPath = join(directory, 'key.pem');
@@ -43,7 +45,7 @@ const close = server => !server?.listening ? Promise.resolve() : new Promise(res
   server.closeAllConnections?.();
 });
 
-let web, ingress, nginx, obs, agent, browser, database;
+let web, ingress, nginx, obs, realObs, agent, browser, database;
 const useNginx = Boolean(process.env.MCR_TEST_NGINX);
 const reservations = useNginx ? [createPortReservation(), createPortReservation()] : [];
 const tunnels = new Set();
@@ -186,35 +188,44 @@ try {
     .get(user.id).ipAddress, fixtureClientIP);
   console.log('Local TLS trust, proxy attribution, origin rejection and secure cookie checks passed');
 
-  obs = new WebSocketServer({ host: '127.0.0.1', port: 0 });
-  await once(obs, 'listening');
   const obsPassword = secret();
-  const salt = secret();
-  const digest = value => createHash('sha256').update(value).digest('base64');
-  obs.on('connection', socket => {
-    const challenge = secret();
-    let identified = false;
-    socket.send(encode({ op: 0, d: {
-      obsWebSocketVersion: '5.0.0', rpcVersion: 1, authentication: { challenge, salt }
-    } }));
-    socket.on('message', raw => {
-      const { op, d } = decode(raw);
-      if (op === 1) {
-        if (d.authentication !== digest(digest(obsPassword + salt) + challenge)) {
-          socket.close(4009, 'Fixture OBS authentication failed');
-          return;
-        }
-        identified = true;
-        socket.send(encode({ op: 2, d: { negotiatedRpcVersion: 1 } }));
-      }
-      if (op === 6 && identified) socket.send(encode({ op: 7, d: {
-        requestType: d.requestType, requestId: d.requestId, requestStatus: { result: true, code: 100 },
-        responseData: d.requestType === 'GetSceneList' ? { scenes: [{ sceneName: 'Fixture Scene' }] } : {}
+  let obsPort;
+  if (process.env.MCR_TEST_REAL_OBS === '1') {
+    const reservation = createPortReservation();
+    obsPort = await listen(reservation);
+    await close(reservation);
+    realObs = await startDisposableObs(directory, obsPort, obsPassword);
+  } else {
+    obs = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await once(obs, 'listening');
+    obsPort = obs.address().port;
+    const salt = secret();
+    const digest = value => createHash('sha256').update(value).digest('base64');
+    obs.on('connection', socket => {
+      const challenge = secret();
+      let identified = false;
+      socket.send(encode({ op: 0, d: {
+        obsWebSocketVersion: '5.0.0', rpcVersion: 1, authentication: { challenge, salt }
       } }));
+      socket.on('message', raw => {
+        const { op, d } = decode(raw);
+        if (op === 1) {
+          if (d.authentication !== digest(digest(obsPassword + salt) + challenge)) {
+            socket.close(4009, 'Fixture OBS authentication failed');
+            return;
+          }
+          identified = true;
+          socket.send(encode({ op: 2, d: { negotiatedRpcVersion: 1 } }));
+        }
+        if (op === 6 && identified) socket.send(encode({ op: 7, d: {
+          requestType: d.requestType, requestId: d.requestId, requestStatus: { result: true, code: 100 },
+          responseData: d.requestType === 'GetSceneList' ? { scenes: [{ sceneName: 'Fixture Scene' }] } : {}
+        } }));
+      });
     });
-  });
+  }
   const station = await repo.getStationRepository().create({
-    name: 'Isolated staging station', organizationId: user.organizationId, obsPort: obs.address().port,
+    name: 'Isolated staging station', organizationId: user.organizationId, obsPort,
     encryptedPassword: CryptoService.encryptSecret(obsPassword)
   });
   const token = JSON.parse(login.body).accessToken;
@@ -241,11 +252,16 @@ try {
   }
   const scenes = await call('/api/v1/stations/' + station.id + '/scenes', { headers: bearer });
   assert.equal(scenes.status, 200);
-  assert.deepEqual(JSON.parse(scenes.body).data.scenes, [{ sceneName: 'Fixture Scene' }]);
+  assert.deepEqual(JSON.parse(scenes.body).data.scenes.map(({ sceneName }) => ({ sceneName })),
+    realObs?.scenes ?? [{ sceneName: 'Fixture Scene' }]);
   const revoke = await call('/api/v1/stations/' + station.id + '/agent/revoke', { method: 'POST', headers: bearer });
   assert.equal(revoke.status, 200);
   await waitFor('Agent revocation', () => agentOutput.includes('Agent credentials or station are no longer valid'));
-  console.log('Real Agent CLI pairing, WSS, scene read and revocation passed with simulated OBS');
+  if (realObs) {
+    console.log('Real Agent pairing, WSS, scene read and revocation passed with OBS Studio', realObs.version.obsVersion);
+  } else {
+    console.log('Real Agent CLI pairing, WSS, scene read and revocation passed with simulated OBS');
+  }
 
   const chrome = process.env.MCR_TEST_CHROME;
   if (chrome) {
@@ -340,6 +356,7 @@ try {
 } finally {
   await stop(browser);
   await stop(agent);
+  await closeFixtureProcess(realObs?.child, 'OBS Studio');
   for (const socket of tunnels) socket.destroy();
   if (obs) {
     for (const socket of obs.clients) socket.terminate();

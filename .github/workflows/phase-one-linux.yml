@@ -20,6 +20,24 @@ jobs:
       - name: Verify Linux Compose and isolated media
         run: bash backend/verification/linux-compose-loopback.sh
 
+  real-obs-loopback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Check out the public review commit
+        run: |
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+      - name: Build and verify disposable OBS Studio
+        run: |
+          docker build --target iptv --build-arg NODE_IMAGE=node:22-bookworm-slim -t mcr-phase-one-worker -f backend/infrastructure/docker/Dockerfile.server .
+          docker build -t mcr-phase-one-obs-fixture -f backend/verification/Dockerfile.obs-verification .
+          docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges --user 1000:1000 \
+            -e MCR_TEST_REAL_OBS=1 mcr-phase-one-obs-fixture \
+            timeout -k 5s 120s xvfb-run -a node backend/verification/phase-one-local-staging.js
+
   offline-advisories:
     runs-on: ubuntu-24.04
     timeout-minutes: 12
@@ -33,7 +51,7 @@ jobs:
       - name: Download public advisories and scan without network access
         run: bash backend/verification/offline-npm-advisories.sh
 
-  vite-lockfile-candidate:
+  desktop-lockfile-candidate:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -43,10 +61,10 @@ jobs:
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
           git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
           git checkout --detach FETCH_HEAD
-      - name: Resolve the patched Vite lockfile without lifecycle scripts or audit requests
+      - name: Resolve the supported Electron lockfile without lifecycle scripts or audit requests
         run: |
-          npm install --workspace @mcr/web --save-dev --save-exact vite@6.4.6 --package-lock-only --ignore-scripts --no-audit --no-fund
-          git diff --check -- frontend/package.json package-lock.json
-          printf 'VITE_LOCKFILE_PATCH='
-          git diff --binary -- frontend/package.json package-lock.json | gzip -c | base64 -w0
+          npm install --workspace @mcr/desktop --save-dev --save-exact electron@45.5.0 --package-lock-only --ignore-scripts --no-audit --no-fund
+          git diff --check -- dicktob/package.json package-lock.json
+          printf 'DESKTOP_LOCKFILE_PATCH='
+          git diff --binary -- dicktob/package.json package-lock.json | gzip -c | base64 -w0
           printf '\n'
