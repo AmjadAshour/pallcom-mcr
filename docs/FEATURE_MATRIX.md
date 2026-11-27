@@ -8,7 +8,7 @@ Target capabilities follow the [public MCR Box feature inventory](https://mcrbox
 | 2 | Remote guests | MISSING | No guest WebRTC workflow found | Invitation, waiting room, TURN and authenticated return feed |
 | 3 | PTZ | MISSING | No ONVIF/VISCA control surface found | Compatible cameras and preset/control tests |
 | 4 | Remote commentary | MISSING | No remote commentary worker found | WebRTC channels, mix-minus and audio return tests |
-| 5 | File playout | PARTIAL | Scheduler, OBS deck adapter, direct MP4 upload to scenes and a Video input with preview and direct Take | Long-form playout, real OBS interoperability, in/out, seek, timing and DST |
+| 5 | File playout | PARTIAL | Scheduler, OBS deck adapter, direct MP4 upload to scenes and a Video input with preview and direct Take. Station managers can assign the single SQLite-backed Program engine from Live Control | Long-form playout, real OBS interoperability, in/out, seek, timing and DST |
 | 6 | Live switching | PARTIAL | LiveControlPage and OBS v5 scene commands | Actual Program output, keying and frame timing |
 | 7 | Graphics | PARTIAL | Graphics page with Independent Program ads, watermark and encoded news ticker, plus OBS graphics and text sources | Templates, scoreboards and isolated third-party graphics |
 | 8 | Replay | PARTIAL | OBS replay buffer start/stop/save controls and OBS save-event timestamp | OBS staging verification, clip playback, marks, variable speed and export |
@@ -34,3 +34,11 @@ Phase 2 staging evidence extends rows 1, 6 and 12. One opt-in worker decodes a l
 Row 7 also includes a global, persisted watermark on the independent encoder. Its Preview/Apply workflow, proportional layout and source-independent stacking have local 720p receiver evidence. [Watermark operating procedure](INDEPENDENT_PROGRAM_STAGING.md)
 
 Independent Program advertising extends row 7 with a station creative library, scheduled image/video playlists, four composited placements and manual controls. Local receiver evidence covers position, size, stacking, motion, fades, gaps and rotation. [Operating and acceptance details](INDEPENDENT_PROGRAM_STAGING.md)
+
+## Master specification baseline
+
+See [Phase Zero test evidence](TEST_REPORT.md) for current isolated checks of the MP4 upload, ticker, authenticated and signed HLS, and simulated OBS acknowledgement. Historical capability statuses do not establish production readiness or approval of a master-specification phase. Exact upload limits and the proposed persistence architecture are in the [development plan](DEVELOPMENT_PLAN.md).
+
+## Post-audit production target
+
+The protected application HLS path remains available. The previous static Compose distribution path is denied. A stable provider gateway, two simultaneous 1080p channels, dynamic channel provisioning, multi-gigabyte movie workflows, continuous direct camera rotation and independent audio continuity are target capabilities awaiting implementation and receiver proof. [Production acceptance](BROADCAST_ACCEPTANCE_PLAN.md)

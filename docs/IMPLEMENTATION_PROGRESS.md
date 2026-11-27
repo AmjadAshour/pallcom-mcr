@@ -165,3 +165,123 @@ The input decoder now clocks both tracks before feeding them into Program and li
 Combined IPTV Live Controls and Program Readiness. Both application builds and all 28 repository tests passed with isolated SQLite and simulated OBS acknowledgements. The combined media loopback fixtures require a GStreamer environment and remain pending.
 
 To roll back the integration, revert the merge with the IPTV branch as its first parent, then revert the IPTV changes separately if the previous main behavior is required. Preserve a SQLite backup before any runtime downgrade. See the feature-specific rollback steps above.
+
+## Live Control cleanup
+
+Moved Independent Program input routing and attenuation to Audio Mixer alongside the existing output controls. Removed the fixed resolution and always-on live badges from the OBS monitors. Live Control retains the input and output readings and the streaming state in the header.
+
+The frontend build and frontend tests passed. To roll back, revert the changes to IndependentProgram, ProgramAudioControls and LiveControlPage together.
+
+## Browser-based Program setup
+
+Live Control lets a station manager assign the SQLite-backed Program engine to a station. The selection persists and takes precedence over the initial MCR_PROGRAM_STATION_ID configuration. The server checks station ownership and permissions, audits changes, and refuses to move an active engine or take an engine assigned to another organization. Scene scheduling follows the selected station.
+
+Video Preview and Program output share the main workspace. The OBS monitor and transition controls are available in an expandable panel when the station is ready. Both builds and all 28 tests passed with isolated SQLite. The simulated OBS integration verifies saved selection and rejection of viewers and out-of-organization access.
+
+To roll back, revert the Program selection API, scheduler and Live Control changes together, then use MCR_PROGRAM_STATION_ID for the intended station. The additive selection table can remain in SQLite.
+
+## Native workspace cleanup
+
+Grouped navigation by broadcast work, administration and optional OBS integrations. Station creation no longer asks for OBS credentials. Removed duplicate recording and streaming controls from station cards, moved the OBS emergency cut into its connected controls, and removed the static uptime figure. Page code loads on navigation.
+
+Both builds and 28 repository tests passed. The local browser opened all twelve routes and verified Arabic RTL. The isolated MP4 fixture decoded a native video scene without OBS. See the [inventory, remaining dependencies and rollback](NATIVE_MCR_CLEANUP.md).
+
+## HLS playback on Windows
+
+The Program worker now passes encoded H.264 and AAC samples directly to an isolated HLS graph using bounded queues. This avoids the intermediate MPEG-TS demux. The isolated HLS fixture passed authenticated playback, independent decoding of HLS and UDP audio/video, playlist advancement, and UDP continuity after an HLS writer failure. The local test1 station displayed the session link after restarting Program and returning the video to air.
+
+To roll back, revert the worker HLS branch and start a new Program session. Keep the HLS directory unset to disable the optional branch.
+
+## Temporary IPTV player links
+
+Station operators can issue a one-hour playback URL for the current Program session. A dedicated token audience restricts the URL to HLS playlists and segments. Every request checks the signing session, current role, organization, station and Program session. Keep token-bearing paths out of request logs. Existing dashboard HLS routes still use normal authentication.
+
+Both builds passed. The isolated HLS fixture decoded video and audio through the signed URL without cookies or authorization headers and checked invalid tokens, session mismatch, login-token separation, revocation and stop. To roll back, remove the signed playback route and link button together. Existing dashboard playback routes require no migration.
+
+## Master specification Phase Zero audit
+
+The attachment matches the permanent [master specification](../MASTER_REQUIREMENTS.md) byte for byte. The Phase Zero audit recorded the architecture, upload limit, risks, capacity model and rollback approach. Both builds and 28 repository tests passed. Loopback receiver checks passed MP4, signed HLS, ticker, watermark and advertising. The isolated SQLite restore passed on rerun after a native process shutdown failure. The [test report](TEST_REPORT.md) records pass scope and open coverage.
+
+The [phase tracker](TASKS.md#current-master-specification-tracker) covers all 21 numbered phases. This audit changes documentation only. To roll it back, revert only the Phase Zero documentation additions and tracker section, retaining existing work and fixtures. Phase One awaits explicit owner approval. The separate Phase 17 reference and approval gate remains mandatory.
+
+## Phase One partial security hardening
+
+Added a safe backend environment example and excluded frontend environment injection, sanitized API error responses, rejected cross-site mutations and disabled Nginx access logging on signed IPTV routes. Isolated tests passed and no live broadcast was interrupted. Phase One remains open. See [test evidence and blockers](PHASE_ONE_GATES.md) and [rollback steps](SECURITY.md#phase-one-hardening-slice).
+
+Phase One follow-up added a shared per-process media preparation limit and rechecks permissions before saving uploads. The tests passed. Host quotas, connection-time destination policy, complete secret-history scanning and authorized staging validation remain open. [Security scope and rollback](SECURITY.md#phase-one-media-preparation-controls)
+
+Phase One now enforces a configurable per-station stored-media quota for native scenes and ads. Both builds, all 30 tests and the independent MP4 receiver passed. A redacted local credential check found four values already present in Git; actual rotation and staging validation remain open. See [verification](PHASE_ONE_GATES.md) and [rollback and recovery](SECURITY.md#station-media-quota-and-credential-findings).
+
+## Phase One offline credential rotation rehearsal
+
+Added a rekey mode to the existing SQLite recovery CLI for encrypted OBS station passwords. It publishes a newly encrypted SQLite copy after a successful transaction and integrity check. The source is opened read-only and overwrite is refused. See [operational steps and rollback](OPERATIONS_RUNBOOK.md#offline-station-encryption-rotation-rehearsal).
+
+Both builds, all 30 suite tests, the existing backup and restore fixture, and the new offline rekey fixture passed. Actual credential rotation, re-enrollment, full historical scanning, connection-time egress enforcement and staging verification remain open. No live restart or production data change was made. To roll back the tool, revert its rekey mode and fixture. It does not add schema changes.
+
+Phase One follow-up added a shared per-account upload rate limit and ran a redacted dedicated source and history scan. The server build, all 30 tests and the MP4 receiver passed. One scanner finding corroborated the known credential issue in the environment configuration. Rotation and staging sign-off remain open. [Gate evidence](PHASE_ONE_GATES.md)
+
+Phase One local verification added network credential reuse rejection and a tested public IPv4 egress proxy for HTTPS contribution. Both builds, 34 suite tests, HTTP/HTTPS policy fixtures and the signed HLS receiver passed. Credential cutover, approved staging source interoperability and actual infrastructure sign-off are still blocked. [Security evidence and rollback](SECURITY.md#network-credential-guard-and-https-source-policy)
+
+Phase One follow-up unified browser mutation origin checks in both Express entry points. Both builds, all 34 tests and the split Program MP4 and HLS loopbacks passed. Actual credential cutover and staging acceptance still require the owner's maintenance and staging authorization. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-browser-mutation-origin-policy).
+
+Phase One follow-up confined browser login and refresh tokens to HttpOnly cookies and preserved programmatic JSON token responses. Both builds and all 34 tests passed. Phase One remains open pending credential cutover and staging acceptance. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-browser-session-token-isolation).
+
+Phase One now verifies oversized JSON and returns a generic response for unsupported body encoding. Both builds and all 34 tests passed. The npm dependency advisory query remains blocked pending approval for external disclosure or access to an internal scanner. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-request-body-rejection).
+
+Phase One bounded the audit log API and verified authorization and tenant scope for the read endpoint. Both builds and all 34 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-audit-log-read-limits).
+
+Phase One added transactional audit logging to the existing administrative account creation route. Both builds and all 34 tests passed, including rollback on an injected event insert failure. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-account-creation-audit).
+
+Phase One now emits the CORS allow-origin header only for the configured origin in REST and Socket.IO. Both builds and all 34 tests passed, including loopback preflight and authenticated connectivity checks. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-cors-response-policy).
+
+Phase One tightened the production content security policy for dashboard assets and connections. Both builds and all 35 tests passed, including the production-mode loopback response check. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-production-content-security-policy).
+
+Phase One added shared receive deadlines to the primary and Program HTTP servers. Both builds, all 35 tests, the split-runtime MP4 receiver and the independent HLS/UDP receiver passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-inbound-http-deadlines).
+
+Phase One moved ad upload admission ahead of body buffering. Both builds, all 35 tests and the independent advertising receiver passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-ad-upload-admission).
+
+Phase One expanded the frontend production artifact audit to nested files and source-map references. A fresh synthetic-marker build and all 36 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-frontend-build-artifact-audit).
+
+Phase One added server-side validation for the station list filters and verified organization scoping with valid filters. Both builds and all 36 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-station-list-filter-validation).
+
+Phase One added organization checks for new and changed station studio assignments. Both builds and all 36 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-station-studio-organization-scope).
+
+Phase One separated the per-IP budgets for login and Agent pairing claims. Both builds and all 36 tests passed, including a valid login after the pairing limit was reached. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-independent-login-and-pairing-limits).
+
+Phase One added administrative response cache protection and strict account creation validation. Both builds and all 36 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-administrative-response-and-write-policy).
+
+Phase One added bounded refresh-token validation before JWT processing. Both builds and all 36 tests passed, including JSON and cookie refresh. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-refresh-request-validation).
+
+Phase One added an explicit deny for unrecognized REST roles and exercised the role matrix on five routes. Both builds and all 36 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-rest-role-checks).
+
+Phase One applied the shared station-read permission to dashboard socket admission and verified tenant-scoped subscriptions. Both builds and all 36 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-dashboard-socket-authorization).
+
+Phase One extended HLS privacy headers to authorization responses and preserved them through the internal Program proxy. Both builds and all 36 tests passed. The independent receiver passed on rerun. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-hls-response-privacy).
+
+Phase One extended the recovery fixture to verify restored station ownership and audit history. Backup, restore and offline rekey passed on isolated SQLite. Both builds and all 36 tests passed. Reverting this fixture and the corresponding documentation does not affect production data or runtime code. [Evidence](PHASE_ONE_GATES.md) and [operating procedure](OPERATIONS_RUNBOOK.md#master-specification-evidence).
+
+Phase One enforced strict write schemas for station creation and settings. Both builds and all 36 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-station-write-schemas).
+
+Phase One enforced an explicit login field list and password length ceiling. Both builds and all 36 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-login-request-bounds).
+
+Phase One unified CSV text handling for the audit and schedule exports. Both builds and all 37 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-csv-export-text-handling).
+
+Phase One tightened temporary video creation and cleanup. Both builds, all 37 tests and split-runtime upload and playback verification passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-temporary-media-cleanup).
+
+Phase One added a current organization check to scheduled automation dispatch. Both builds and all 37 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-scheduled-automation-organization-scope).
+
+Phase One corrected audit attribution for manual macro runs while preserving scheduled attribution. Both builds and all 37 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-manual-automation-audit).
+
+Phase One made automation cancellation and its audit event atomic. Both builds and all 37 tests passed, including rollback and concurrent requests. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-automation-cancellation-audit).
+
+Phase One made automation creation and its audit event atomic. Both builds and all 37 tests passed. [Evidence](PHASE_ONE_GATES.md) and [rollback](SECURITY.md#phase-one-automation-creation-audit).
+
+Phase One added validated ingress proxy addresses for Express client attribution. Both builds and all 38 tests passed. [Evidence](PHASE_ONE_GATES.md) and [deployment and rollback](DEPLOYMENT.md#phase-one-explicit-proxy-trust).
+
+Phase One extended proxy verification to inspect login audit entries generated through a real local HTTP proxy. Both builds and all 38 tests passed. [Evidence](TEST_REPORT.md#phase-one-loopback-proxy-audit-attribution).
+
+Phase One added isolated TLS staging with Chromium, secure HTTP and WSS sessions and the real Agent CLI against simulated OBS. The backend now refuses unsupported storage modes instead of silently selecting SQLite, and the fixture expanded station read authorization coverage. Both builds and all 39 tests passed. Public proxy and privilege sign-off, real OBS, dependency advisories and credential cutover remain open. [Consolidated evidence](TEST_REPORT.md#phase-one-consolidated-local-staging-evidence) and [rollback](DEPLOYMENT.md#phase-one-local-staging).
+
+## 2026-11-27 — Post-audit Phase One
+
+Baseline HEAD was `c3ab678307f2994f35dbb33f2e0a67efbbe237c3` with 89 pre-existing status entries. This checkpoint describes the working tree. Reproduce from an approved immutable snapshot before release. Current production targets and the proposed sequence are in the master requirements and development plan. [Tests](TEST_REPORT.md) · [Release gates](SECURITY_RELEASE_GATES.md)

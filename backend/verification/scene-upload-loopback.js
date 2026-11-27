@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { appendFileSync, mkdtempSync, openAsBlob } from 'node:fs';
+import { appendFileSync, mkdtempSync, openAsBlob, readdirSync } from 'node:fs';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 const directory = mkdtempSync(join(tmpdir(), 'mcr-scene-upload-'));
+const uploadTemp = mkdtempSync(join(directory, 'media-temp-'));
 const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
 const secret = () => randomBytes(32).toString('hex');
 Object.assign(process.env, {
@@ -59,7 +60,7 @@ async function waitFor(check) {
     await sleep(100);
   }
 }
-const start = script => spawn(process.execPath, [script], { windowsHide: true, stdio: 'inherit' });
+const start = (script, env = process.env) => spawn(process.execPath, [script], { env, windowsHide: true, stdio: 'inherit' });
 async function stop(child) {
   if (child && child.exitCode === null && child.signalCode === null) {
     const exited = once(child, 'close');
@@ -67,14 +68,36 @@ async function stop(child) {
     await exited;
   }
 }
-const runtime = start('backend/src/program-runtime.js');
+const runtime = start('backend/src/program-runtime.js', { ...process.env, TMPDIR: uploadTemp, TEMP: uploadTemp, TMP: uploadTemp });
 const web = start('backend/src/index.js');
 let decoder;
 try {
   await waitFor(() => call(path + '/library', 'GET', undefined, false).then(r => r.status === 401).catch(() => false));
+  const browserCommand = origin => fetch(root, {
+    method: 'POST',
+    headers: {
+      Cookie: 'mcr_access_token=' + token,
+      'Content-Type': 'application/json',
+      ...(origin && { Origin: origin })
+    },
+    body: JSON.stringify({ action: 'stop' })
+  });
+  assert.equal((await browserCommand(undefined)).status, 403);
+  assert.equal((await browserCommand('http://untrusted.example.test')).status, 403);
+  assert.equal((await browserCommand(new URL(root).origin)).status, 200);
+  assert.equal((await call('', 'POST', { action: 'stop' })).status, 200);
+  console.log('Split Program runtime enforces cookie mutation origin and preserves bearer clients');
+
   const upload = path + '/video?name=Playout%20fixture.mp4';
+  const invalidMedia = new Blob(['Synthetic text fixture'], { type: 'video/mp4' });
+  await result(await call(upload, 'POST', invalidMedia), 400);
+  const { assets } = await result(await call('/ads'));
+  assert.deepEqual(assets, []);
+  assert(!readdirSync(uploadTemp).some(name => name.startsWith('mcr-creative-')));
   const asset = await result(await call(upload, 'POST', media), 201);
   assert.equal(asset.kind, 'video');
+  assert(!readdirSync(uploadTemp).some(name => name.startsWith('mcr-creative-')));
+  console.log('Scene upload validation and temporary media cleanup passed');
   const scene = { id: randomUUID(), name: 'Video only', video: asset.id, x: 5, y: 5, w: 20, h: 20 };
   await result(await call(path, 'PUT', scene));
   const started = await result(await call('', 'POST', { action: 'start' }));

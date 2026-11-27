@@ -6,13 +6,14 @@ import { useMonitorFrame } from '../context/useProgramMonitor.js';
 import { pollWhileVisible } from '../context/pollWhileVisible.js';
 import { ProgramVideoInput } from './ProgramVideoInput.jsx';
 import { ProgramAudioMonitor } from './ProgramAudioMonitor.jsx';
+import { ProgramStreamLink } from './ProgramStreamLink.jsx';
 
 const en = { title: 'Independent Program', start: 'Start Program', stop: 'Stop Program', obs: 'Take Input 1', obs2: 'Take Input 2',
   fallback: 'Take slate', running: 'Running', stopped: 'Stopped', failed: 'Worker failed', starting: 'Starting',
-  stopping: 'Stopping', disconnected: 'No signal', warming: 'Stabilizing', black: 'Black picture', frozen: 'Frozen picture', silent: 'Silent audio', ready: 'Ready', slate: 'Slate', receiver: 'Local receiver' };
+  stopping: 'Stopping', disconnected: 'No signal', warming: 'Stabilizing', black: 'Black picture', frozen: 'Frozen picture', silent: 'Silent audio', ready: 'Ready', slate: 'Slate' };
 const ar = { title: 'خرج البرنامج المستقل', start: 'تشغيل البرنامج', stop: 'إيقاف البرنامج', obs: 'بث المدخل الأول', obs2: 'بث المدخل الثاني',
   fallback: 'بث لوحة الانتظار', running: 'قيد التشغيل', stopped: 'متوقف', failed: 'تعطل محرك البث', starting: 'جارٍ التشغيل',
-  stopping: 'جارٍ الإيقاف', disconnected: 'لا توجد إشارة', warming: 'جارٍ تثبيت الإشارة', black: 'صورة سوداء', frozen: 'صورة متجمّدة', silent: 'صمت صوتي', ready: 'جاهز', slate: 'لوحة الانتظار', receiver: 'المستقبل المحلي' };
+  stopping: 'جارٍ الإيقاف', disconnected: 'لا توجد إشارة', warming: 'جارٍ تثبيت الإشارة', black: 'صورة سوداء', frozen: 'صورة متجمّدة', silent: 'صمت صوتي', ready: 'جاهز', slate: 'لوحة الانتظار' };
 const receiverStatus = {
   en: { waiting: 'Waiting for receiver', decoding: 'Audio and video decoded', 'video-only': 'Video only',
     'audio-only': 'Audio only', 'no-media': 'No decoded media', offline: 'Receiver reports stopped' },
@@ -30,39 +31,9 @@ function PictureMonitor({ title, frame, waiting }) {
   </figure>;
 }
 
-function InputAudioControl({ language, label, setting, pending, onApply }) {
-  const [draft, setDraft] = useState(null);
+export function IndependentProgram({ stationId, language, canControl, canManage }) {
   const arabic = language === 'ar';
-  const mode = draft?.mode ?? setting.mode;
-  const gainDb = draft?.gainDb ?? setting.gainDb;
-  return <fieldset className="flex flex-wrap items-center gap-3 rounded border border-zinc-700 p-2 text-sm" disabled={pending}>
-    <legend className="px-1">{label}</legend>
-    <label className="flex items-center gap-2">
-      {arabic ? 'التوجيه' : 'Routing'}
-      <select className="rounded border border-zinc-600 bg-zinc-950 p-1" value={mode}
-        onChange={event => setDraft({ ...draft, mode: event.target.value })}>
-        <option value="follow">{arabic ? 'يتبع الصورة' : 'Follow picture'}</option>
-        <option value="on">{arabic ? 'يمتزج عند الجاهزية' : 'Mix when ready'}</option>
-        <option value="off">{arabic ? 'كتم المدخل' : 'Mute input'}</option>
-      </select>
-    </label>
-    <label className="flex items-center gap-2">
-      {arabic ? 'خفض المستوى' : 'Attenuation'}
-      <input type="range" min={-30} max={0} value={gainDb}
-        onChange={event => setDraft({ ...draft, gainDb: Number(event.target.value) })} />
-      <span dir="ltr" className="tabular-nums">{gainDb} dB</span>
-    </label>
-    <button type="button" className="rounded border border-zinc-600 px-2 py-1 disabled:opacity-50"
-      disabled={mode === setting.mode && gainDb === setting.gainDb}
-      onClick={async () => { if (await onApply({ mode, gainDb })) setDraft(null); }}>
-      {arabic ? 'تطبيق على Program' : 'Apply to Program'}
-    </button>
-    {setting.routed && <span>{arabic ? 'موجّه إلى Program' : 'Routed to Program'}</span>}
-  </fieldset>;
-}
-
-export function IndependentProgram({ stationId, language, canControl }) {
-  const t = language === 'ar' ? ar : en;
+  const t = arabic ? ar : en;
   const path = stationPath(stationId, '/program');
   const [status, setStatus] = useState(null);
   const [pending, setPending] = useState(false);
@@ -84,16 +55,36 @@ export function IndependentProgram({ stationId, language, canControl }) {
       }
     }, 3000);
   }, [path, pending]);
-  async function send(body, suffix = '') {
+  async function send(body, suffix = '', method = 'POST') {
     setPending(true);
     setError('');
     try {
-      setStatus((await api(path + suffix, { method: 'POST', body })).data);
+      setStatus((await api(path + suffix, { method, body })).data);
     }
     catch (err) { setError(err.message); return false; }
     finally { setPending(false); }
   }
-  if (!status?.configured && !readError && !error) return null;
+  if (!status?.configured) return <section className="space-y-3 rounded-lg border border-zinc-700 bg-zinc-900 p-4">
+    <h2 className="font-semibold">{t.title}</h2>
+    <p className="text-sm text-zinc-300">{readError || (status
+      ? (arabic ? 'فعّل خرج البرنامج لهذه المحطة لرفع الفيديو ومعاينته وبثّه.' : 'Enable Program for this station to upload, preview and take video.')
+      : (arabic ? 'جارٍ التحقق من حالة خرج البرنامج…' : 'Checking Program status…'))}</p>
+    {status && canManage && <button type="button" disabled={pending}
+      className="rounded border border-cyan-700 px-4 py-2 text-sm disabled:opacity-50"
+      onClick={() => send(undefined, '/selection', 'PUT')}>
+      {arabic ? 'تفعيل خرج البرنامج لهذه المحطة' : 'Enable Program for this station'}
+    </button>}
+    {status && canManage && <p className="text-xs text-zinc-400">
+      {arabic ? 'يدعم المحرك محطة واحدة في كل مرة. أوقف البرنامج الحالي قبل تبديل المحطة.'
+        : 'The engine serves one station at a time. Stop the current Program before switching stations.'}
+    </p>}
+    {status && !canManage && <p className="text-sm text-zinc-400">
+      {arabic ? 'اطلب من مسؤول المحطة تفعيل الخرج.' : 'Ask a station manager to enable Program.'}
+    </p>}
+    {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
+  </section>;
+  const playlistPath = status.hls === 'ready' && running
+    ? '/api/v1' + path + '/hls/' + encodeURIComponent(status.session) + '/index.m3u8' : null;
   const actions = running ? ['stop', 'fallback'] : ['start'];
   function takeButton(input) {
     return <button type="button" className="rounded border border-zinc-600 px-3 py-2 text-sm disabled:opacity-50"
@@ -104,30 +95,44 @@ export function IndependentProgram({ stationId, language, canControl }) {
   }
   return <section className="rounded-lg border border-zinc-700 bg-zinc-900 p-4 space-y-2">
     <h2 className="flex items-center gap-2 font-semibold"><Radio size={16} aria-hidden="true" />{t.title}</h2>
+    <ProgramStreamLink key={status.session ?? status.state} status={status} privatePath={playlistPath} programPath={path} canControl={canControl} language={language} />
     {status && <p role="status" className="text-sm">{t[status.state]}
       {running && <> · PGM {status.source === 'obs2' ? (language === 'ar' ? 'المدخل الثاني' : 'Input 2')
         : status.source === 'obs' ? (status.inputMode === 'url' ? 'MPEG-TS URL' : (language === 'ar' ? 'المدخل الأول' : 'Input 1')) : status.source === 'scene'
         ? (language === 'ar' ? 'مشهد محلي' : 'Local scene') : t.slate}</>}</p>}
-    {running && <p className="text-xs text-zinc-400">{t.receiver} <code dir="ltr">udp://127.0.0.1:{status.outputPort}</code></p>}
     {running && status.source === 'fallback' && ['waiting', 'unavailable'].includes(status.sourceRecovery) &&
       <p role="status" className="text-sm text-amber-300">{status.sourceRecovery === 'waiting'
         ? (language === 'ar' ? 'بانتظار جاهزية المصدر المحفوظ' : 'Waiting for the saved source')
         : (language === 'ar' ? 'تعذّرت استعادة المصدر المحفوظ' : 'Saved source could not be restored')}</p>}
-    {status?.configured && <div className="grid gap-3 md:grid-cols-2">
+    <div className="grid items-start gap-4 lg:grid-cols-2">
+      {canControl && <ProgramVideoInput path={path} language={language} status={status} pending={pending}
+        onTake={video => send({ video }, '/local-scene/video/take')} />}
+
+      <section className="space-y-2 lg:col-start-2 lg:row-start-1">
+        <PictureMonitor title={arabic ? 'خرج البث · Program' : 'Program output'}
+          frame={programFrame} waiting={running ? (arabic ? 'بانتظار صورة البث' : 'Waiting for Program picture') : t[status.state]} />
+        {canControl && <div className="flex flex-wrap gap-2">{actions.map(action =>
+          <button type="button" key={action} className="rounded border border-zinc-600 px-3 py-2 text-sm disabled:opacity-50"
+            disabled={pending || ['starting', 'stopping'].includes(status.state) ||
+              (action === 'fallback' && status.source === 'fallback')}
+            onClick={() => {
+              if (action === 'stop' && !window.confirm(arabic ? 'هل تريد إيقاف خرج البث؟' : 'Stop the Program output?')) return;
+              if (action === 'fallback' && !window.confirm(arabic ? 'هل تريد بث لوحة الانتظار؟' : 'Take the standby slate to air?')) return;
+              void send({ action });
+            }}>{t[action]}</button>)}</div>}
+      </section>
+    </div>
+    {running && <div className="grid gap-3 md:grid-cols-2">
       {running && <div className="min-w-0 space-y-2">
         <PictureMonitor title={language === 'ar' ? 'معاينة المدخل الأول' : 'Input 1 Preview'}
           frame={inputFrame} waiting={language === 'ar' ? 'بانتظار الإشارة' : 'Waiting for input'} />
         <div className="flex flex-wrap items-center gap-2 text-sm">{takeButton('obs')} <span>{t[status.obs]}</span></div>
       </div>}
-      {running && <PictureMonitor title={language === 'ar' ? 'مراقبة صورة Program' : 'Program picture monitor'}
-        frame={programFrame} waiting={language === 'ar' ? 'بانتظار صورة Program' : 'Waiting for Program picture'} />}
       {running && status.secondPort && <div className="min-w-0 space-y-2">
         <PictureMonitor title={language === 'ar' ? 'معاينة المدخل الثاني' : 'Input 2 Preview'}
           frame={secondInputFrame} waiting={language === 'ar' ? 'بانتظار الإشارة' : 'Waiting for input'} />
         <div className="flex flex-wrap items-center gap-2 text-sm">{takeButton('obs2')} <span>{t[status.obs2]}</span></div>
       </div>}
-      {canControl && <ProgramVideoInput path={path} language={language} status={status} pending={pending}
-        onTake={video => send({ video }, '/local-scene/video/take')} />}
     </div>}
     {running && status.secondPort && <p className="text-xs text-zinc-400">
       {language === 'ar' ? 'المدخل الثاني' : 'Input 2'} · {t[status.obs2]} · <code dir="ltr">udp://{status.secondInputHost}:{status.secondPort}</code>
@@ -146,11 +151,6 @@ export function IndependentProgram({ stationId, language, canControl }) {
     </div>)}
     {running && status.audioMonitorAvailable &&
       <ProgramAudioMonitor key={status.session} path={path + '/audio-monitor'} language={language} />}
-    {running && canControl && Object.entries(status.inputAudioMix ?? {}).map(([input, setting]) =>
-      <InputAudioControl key={status.session + input} language={language} setting={setting} pending={pending}
-        label={input === 'obs' ? (language === 'ar' ? 'صوت المدخل الأول' : 'Primary input audio')
-          : (language === 'ar' ? 'صوت المدخل الثاني' : 'Secondary input audio')}
-        onApply={draft => send({ action: 'input-audio', inputAudio: { input, ...draft } })} />)}
     {running && (status.srtDestinations ?? (status.srt && status.srt !== 'disabled'
       ? [{ id: 'primary', state: status.srt, encrypted: status.srtEncrypted }] : [])).map(destination =>
       <p key={destination.id} role="status" className="text-sm text-zinc-300">
@@ -165,14 +165,6 @@ export function IndependentProgram({ stationId, language, canControl }) {
         {destination.receiver && <> · {language === 'ar' ? 'المستقبل' : 'Receiver'}{' '}
           {(receiverStatus[language] ?? receiverStatus.en)[destination.receiver]}</>}
       </p>)}
-    {running && status.hls && status.hls !== 'disabled' && <p role="status" className="text-sm text-zinc-300">
-      {status.hls === 'ready'
-        ? <a className="underline" href={'/api/v1' + path + '/hls/' + status.session + '/index.m3u8'}>
-          {language === 'ar' ? 'رابط بث HLS' : 'HLS playlist'}
-        </a>
-        : status.hls === 'failed' ? (language === 'ar' ? 'تعذّر خرج HLS' : 'HLS output unavailable')
-          : (language === 'ar' ? 'جارٍ تجهيز خرج HLS' : 'Preparing HLS output')}
-    </p>}
     {status?.deliveryIncidents?.length > 0 && <details className="rounded border border-zinc-700 p-2 text-sm">
       <summary className="cursor-pointer">{language === 'ar' ? 'سجل انقطاع المخارج واستعادتها' : 'Output incident history'}</summary>
       <ul className="mt-2 space-y-1">
@@ -203,11 +195,6 @@ export function IndependentProgram({ stationId, language, canControl }) {
         : <code dir="ltr">udp://{status.inputHost}:{status.inputPort}</code>}
     </p>}
     {(readError || error) && <p role="alert" className="text-red-300">{readError || error}</p>}
-    {status?.configured && <div className="flex flex-wrap gap-2">{actions.map(action =>
-      <button key={action} className="rounded border border-zinc-600 px-3 py-2 text-sm disabled:opacity-50"
-        disabled={!canControl || pending || ['starting', 'stopping'].includes(status.state) ||
-          (action === 'fallback' && status.source === 'fallback')}
-        onClick={() => send({ action })}>{t[action]}</button>)}</div>}
     {status?.configured && canControl && <nav className="flex flex-wrap gap-3 border-t border-zinc-700 pt-2 text-sm text-cyan-300">
       <Link to="/graphics">{language === 'ar' ? 'الجرافيكس والتراكبات' : 'Graphics & Overlays'}</Link>
       <Link to="/sources">{language === 'ar' ? 'المصادر والمشاهد' : 'Sources & Scenes'}</Link>

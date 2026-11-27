@@ -34,6 +34,7 @@ export class SqliteStationRepository extends IStationRepository {
   }
 
   async create(data) {
+    if (data.studioId != null) this.#requireOrganizationStudio(data.studioId, data.organizationId);
     const id = data.id || crypto.randomUUID();
     const now = new Date().toISOString();
     const slug = data.slug || data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -84,6 +85,9 @@ export class SqliteStationRepository extends IStationRepository {
   async update(id, organizationId, updateData) {
     const existing = await this.findById(id, organizationId);
     if (!existing) return null;
+    if (updateData.studioId != null && updateData.studioId !== existing.studioId) {
+      this.#requireOrganizationStudio(updateData.studioId, organizationId);
+    }
 
     const now = new Date().toISOString();
     const fields = [];
@@ -115,6 +119,12 @@ export class SqliteStationRepository extends IStationRepository {
     stmt.run(...values);
 
     return await this.findById(id, organizationId);
+  }
+
+  #requireOrganizationStudio(studioId, organizationId) {
+    const studio = this.db.prepare('SELECT 1 FROM studios WHERE id = ? AND organizationId = ?')
+      .get(studioId, organizationId);
+    if (!studio) throw Object.assign(new Error('Studio not found'), { statusCode: 404 });
   }
 
   async updateStatus(id, statusData) {

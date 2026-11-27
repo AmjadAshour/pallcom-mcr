@@ -1,7 +1,7 @@
 import { ROLE_PERMISSIONS } from '@mcr/shared';
 import { randomUUID } from 'node:crypto';
 import { getSqliteDatabase } from '../database/sqlite.js';
-import { programStatus } from './supervisor.js';
+import { programStatus, selectedProgramStation } from './supervisor.js';
 import { takeSavedScene } from './resume-source.js';
 
 const day = 24 * 60 * 60 * 1000;
@@ -21,14 +21,14 @@ export function createProgramSchedule(db, { stationId, userId, sceneId, scene, d
   }
 }
 
-export function startProgramSchedule(stationId, clock = Date.now) {
-  if (!stationId) return;
+export function startProgramSchedule(clock = Date.now) {
   const db = getSqliteDatabase();
   const finish = db.prepare('UPDATE program_schedule SET state=?,executedAt=?,error=? WHERE id=?');
-  db.prepare("UPDATE program_schedule SET state='failed',error='Runtime restarted during take' WHERE stationId=? AND state='running'").run(stationId);
+  db.prepare("UPDATE program_schedule SET state='failed',error='Runtime restarted during take' WHERE state='running'").run();
   let executing = false;
   async function tick() {
-    if (executing) return;
+    const stationId = selectedProgramStation();
+    if (executing || !stationId) return;
     const now = clock();
     const job = db.prepare("SELECT * FROM program_schedule WHERE stationId=? AND state='pending' AND dueAt<=? ORDER BY dueAt LIMIT 1")
       .get(stationId, now);

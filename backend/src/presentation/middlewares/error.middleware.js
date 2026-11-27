@@ -1,12 +1,13 @@
-import { env } from '../../config/env.js';
-
 export function errorHandler(err, req, res, next) {
-  const statusCode = err.statusCode || 500;
-  const isProd = env.NODE_ENV === 'production';
+  if (res.headersSent) return next(err);
+  const status = err.statusCode ?? err.status;
+  const statusCode = Number.isInteger(status) && status >= 400 && status <= 599 ? status : 500;
+  const error = err.type === 'entity.parse.failed' ? 'Invalid request body'
+    : statusCode === 413 ? 'Request body is too large'
+    : statusCode === 415 ? 'Unsupported request body format'
+    : statusCode >= 500 && statusCode !== 503 ? 'Internal Server Error'
+    : statusCode === 503 ? 'Service unavailable'
+    : err.message || 'Request rejected';
 
-  res.status(statusCode).json({
-    success: false,
-    error: isProd && statusCode === 500 ? 'Internal Server Error' : err.message,
-    ...(isProd ? {} : { stack: err.stack })
-  });
+  res.status(statusCode).json({ success: false, error });
 }

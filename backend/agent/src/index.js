@@ -59,7 +59,7 @@ async function pairDevice(args) {
     }
   } catch (err) {
     console.error(`[MCR Agent] Pairing error: ${err.message}`);
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 

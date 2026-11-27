@@ -7,7 +7,8 @@ import cookieParser from 'cookie-parser';
 import pino from 'pino';
 import { fileURLToPath } from 'node:url';
 
-import { env } from './config/env.js';
+import { env, isExposedBootstrapPassword } from './config/env.js';
+import { inboundHttpOptions } from './config/http-server.js';
 import { apiRouter } from './presentation/routes/index.js';
 import { graphicsRouter } from './presentation/routes/graphics.js';
 import { watermarkRouter } from './presentation/routes/watermark.js';
@@ -16,6 +17,7 @@ import { adsRouter } from './presentation/routes/ads.js';
 import { scenesRouter } from './presentation/routes/scenes.js';
 import { playoutRouter } from './presentation/routes/playout.js';
 import { attachPlayout, restorePlayout } from './infrastructure/playout/engine.js';
+import { requireMutationOrigin } from './presentation/middlewares/mutation-origin.middleware.js';
 import { errorHandler } from './presentation/middlewares/error.middleware.js';
 import { apiLimiter } from './presentation/middlewares/rate-limiter.middleware.js';
 import { setupSocketGateway } from './infrastructure/realtime/socket-gateway.js';
@@ -27,37 +29,39 @@ import { startProgramSchedule } from './infrastructure/program/schedule.js';
 
 const logger = pino({ level: env.LOG_LEVEL });
 const app = express();
-if (process.env.MCR_TRUST_PROXY === '1') app.set('trust proxy', 1);
-const server = http.createServer(app);
+app.set('trust proxy', env.TRUST_PROXY);
+const server = http.createServer(inboundHttpOptions, app);
 
 // 1. Security Headers (Helmet)
 app.use(helmet({
-  contentSecurityPolicy: env.NODE_ENV === 'production' ? undefined : false,
+  contentSecurityPolicy: env.NODE_ENV === 'production' ? {
+    directives: {
+      connectSrc: ["'self'", `wss://${new URL(env.CORS_ORIGIN).host}`],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+      mediaSrc: ["'self'"],
+      styleSrc: ["'self'", 'https://fonts.googleapis.com', "'unsafe-inline'"]
+    }
+  } : false,
   crossOriginEmbedderPolicy: false
 }));
 
 // 2. Strict CORS Configuration
 app.use(cors({
-  origin: env.CORS_ORIGIN,
+  origin: [env.CORS_ORIGIN],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
 
-app.use('/api', (req, res, next) => {
-  const origin = req.get('Origin');
-  if (!origin || ['GET', 'HEAD', 'OPTIONS'].includes(req.method) || origin === env.CORS_ORIGIN) return next();
-  if (env.NODE_ENV !== 'production' && origin === req.protocol + '://' + req.get('Host')) return next();
-  return res.status(403).json({ success: false, error: 'Request origin is not allowed' });
-});
+app.use('/api', requireMutationOrigin);
 
 // 4. Rate Limiting on API endpoints
 app.use('/api', apiLimiter);
 
 const runtimePort = programRuntimePort(process.env.MCR_PROGRAM_RUNTIME_PORT);
 if (runtimePort) {
-  if (runtimePort === env.PORT || !process.env.MCR_PROGRAM_STATION_ID || env.STORAGE_MODE !== 'sqlite') {
-    throw new Error('Separate Program runtime requires its own port, station ID and SQLite storage');
+  if (runtimePort === env.PORT || env.STORAGE_MODE !== 'sqlite') {
+    throw new Error('Separate Program runtime requires its own port and SQLite storage');
   }
   app.use(forwardProgram(runtimePort));
 }
@@ -109,6 +113,7 @@ async function initDefaultData() {
     const userRepo = RepositoryFactory.getUserRepository();
     const existingAdmin = await userRepo.findByEmail('admin@mcrpro.local');
     const bootstrapPassword = process.env.MCR_ADMIN_PASSWORD;
+    const previousPassword = process.env.MCR_PREVIOUS_ADMIN_PASSWORD;
     if (!existingAdmin && bootstrapPassword?.length >= 12) {
       const passwordHash = await CryptoService.hashPassword(bootstrapPassword);
       await userRepo.create({
@@ -121,7 +126,8 @@ async function initDefaultData() {
       });
       logger.info('Bootstrap administrator initialized');
     } else if (existingAdmin && bootstrapPassword?.length >= 12 &&
-      await CryptoService.verifyPassword(existingAdmin.passwordHash, 'Admin123456!')) {
+      isExposedBootstrapPassword(previousPassword) &&
+      await CryptoService.verifyPassword(existingAdmin.passwordHash, previousPassword)) {
       await userRepo.update(existingAdmin.id, { passwordHash: await CryptoService.hashPassword(bootstrapPassword) });
       logger.info('Legacy administrator password rotated');
     } else if (!existingAdmin) {
@@ -140,7 +146,10 @@ if (process.env.NODE_ENV !== 'test') {
     await initDefaultData();
     startAutomationWorker();
     restorePlayout();
-    if (!runtimePort) startProgramSchedule(process.env.MCR_PROGRAM_STATION_ID);
+    if (!runtimePort && env.STORAGE_MODE === 'sqlite' && server.listening) {
+      const scheduleTimer = startProgramSchedule();
+      server.once('close', () => clearInterval(scheduleTimer));
+    }
   });
 }
 

@@ -1,18 +1,21 @@
 import { Router, raw } from 'express';
 import { z } from 'zod';
 import { scheduledInstant, transportAction } from '@mcr/shared';
-import { authenticate } from '../middlewares/auth.middleware.js';
+import { authenticate, hasCurrentPermission } from '../middlewares/auth.middleware.js';
 import { authorize } from '../middlewares/rbac.middleware.js';
+import { mediaUploadLimiter } from '../middlewares/rate-limiter.middleware.js';
 import { validateBody } from '../middlewares/validate.middleware.js';
 import { getSqliteDatabase } from '../../infrastructure/database/sqlite.js';
 import { insertAuditEvent } from '../../infrastructure/repositories/sqlite-audit-repository.js';
 import { adPlan, applyPlacements, runtimeNow } from '../../infrastructure/program/ads.js';
 import { prepareCreative } from '../../infrastructure/program/ad-creatives.js';
-import { storeCreative } from '../../infrastructure/program/creative-library.js';
+import { reserveCreativeUpload, storeCreative } from '../../infrastructure/program/creative-library.js';
 import { configured, updateAds, usesLocalSceneAsset } from '../../infrastructure/program/supervisor.js';
 
 export const adsRouter = Router();
 const root = '/stations/:id/program/ads';
+const assetTypes = ['image/png', 'image/jpeg', 'image/webp', 'video/mp4'];
+const readAssetBody = raw({ type: assetTypes, limit: '12mb' });
 const pct = z.number().min(0).max(100);
 const ms = z.number().int().min(0).max(86400000);
 const delta = z.number().min(-100).max(100);
@@ -54,7 +57,6 @@ const rev = z.number().int().nonnegative();
 const schema = z
   .object({ revision: rev, zone: z.string().min(1).max(80), placements: z.array(placement).max(4) })
   .strict();
-const prepares = new Set();
 const db = getSqliteDatabase;
 const library = (id) =>
   db().prepare('SELECT id,name,kind,frames FROM ad_assets WHERE stationId=? ORDER BY name,id').all(id);
@@ -126,23 +128,30 @@ adsRouter.get(root + '/assets/:asset/media', (req, res) => {
 });
 adsRouter.post(
   root + '/assets',
-  raw({ type: ['image/png', 'image/jpeg', 'image/webp', 'video/mp4'], limit: '12mb' }),
+  mediaUploadLimiter,
   async (req, res, next) => {
     const id = req.params.id;
-    let locked = false;
+    let release;
     try {
       const name = z.string().trim().min(1).max(100).safeParse(req.query.name);
-      if (!name.success || !Buffer.isBuffer(req.body)) fail('Choose a named PNG, JPEG, WebP or MP4');
-      if (prepares.has(id) || library(id).length >= 32) fail('Library is busy or full (32 creatives)', 409);
-      prepares.add(id);
-      locked = true;
+      const mime = req.is(assetTypes);
+      if (!name.success || !mime) fail('Choose a named PNG, JPEG, WebP or MP4');
+      if (library(id).length >= 32) fail('Media library is full (32 files)', 409);
+      release = reserveCreativeUpload();
+      await new Promise((resolve, reject) => readAssetBody(req, res, error => {
+        if (error) reject(error);
+        else resolve();
+      }));
+      if (!Buffer.isBuffer(req.body)) fail('Choose a named PNG, JPEG, WebP or MP4');
       let prepared;
       try {
-        prepared = await prepareCreative(req.body, req.get('Content-Type').split(';')[0]);
+        prepared = await prepareCreative(req.body, mime);
       } catch (error) {
         if (error.code === 'ENOENT') fail('FFmpeg is unavailable on the media host', 503);
         fail('Unreadable image or MP4; video limit is 30 seconds');
       }
+      if (res.destroyed) return;
+      if (!hasCurrentPermission(req.user, 'station:control')) return res.sendStatus(403);
       if (!owns(req)) return res.sendStatus(404);
       const asset = transaction(() => {
         const asset = storeCreative(db(), id, name.data, prepared);
@@ -158,7 +167,7 @@ adsRouter.post(
     } catch (error) {
       next(error);
     } finally {
-      if (locked) prepares.delete(id);
+      release?.();
     }
   }
 );

@@ -1,10 +1,10 @@
 import React from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { Link, useOutletContext } from 'react-router-dom';
 import { ProgramPreview } from '../components/ProgramPreview.jsx';
 import { IndependentProgram } from '../components/IndependentProgram.jsx';
 import { useMcrStore } from '../context/useMcrStore.js';
 import { translations } from '../i18n/translations.js';
-import { Card, CardHeader, CardTitle, CardContent, Button, TallyIndicator, TBarSlider } from '@mcr/ui';
+import { Button, TallyIndicator, TBarSlider } from '@mcr/ui';
 import { Radio, Film, Activity } from 'lucide-react';
 
 export function LiveControlPage() {
@@ -19,6 +19,7 @@ export function LiveControlPage() {
     triggerAutoTransition,
     tBarPosition,
     setTBarPosition,
+    triggerEmergencyCut,
     toggleStream,
     toggleRecord, pending, releaseTBar, setStudioMode, setTransitionType, setTransitionDuration
   } = useMcrStore();
@@ -27,13 +28,19 @@ export function LiveControlPage() {
   const currentStation = stations.find((s) => s.id === selectedStationId) || stations[0];
 
   const user = useOutletContext();
-  if (!currentStation) return null;
+  const ar = language === 'ar';
+  if (!currentStation) return <p>{ar ? 'أضف محطة للبدء.' : 'Add a station to get started.'}{' '}
+    <Link className="underline" to="/stations">{t.nav.stations}</Link>
+  </p>;
+  const canControl = user.permissions.includes('*') || user.permissions.includes('station:control');
+  const canManage = user.permissions.includes('*') || user.permissions.includes('station:manage');
   const disabled = !currentStation.ready || Boolean(pending[currentStation.id]) ||
-    !(user.permissions.includes('*') || user.permissions.includes('station:control'));
+    !canControl;
   const studioUnavailable = disabled || !currentStation.studioModeEnabled;
 
   const isStreaming = currentStation.streamStatus === 'STREAMING';
   const isRecording = currentStation.recordStatus === 'RECORDING';
+  const canEmergencyCut = currentStation.scenes.some(scene => scene.name === 'Emergency Slate / Standby');
 
   return (
     <div className="space-y-4">
@@ -44,17 +51,18 @@ export function LiveControlPage() {
             <Radio className="w-5 h-5 text-red-500 animate-pulse" />
           </div>
           <div>
-            <label className="text-[10px] font-mono uppercase text-zinc-400 block">
+            <label htmlFor="live-station" className="text-[10px] font-mono uppercase text-zinc-400 block">
               {t.liveControl?.activeStation || 'Active Control Station'}
             </label>
             <select
+              id="live-station"
               value={currentStation.id}
               onChange={(e) => selectStation(e.target.value)}
               className="bg-zinc-950 border border-zinc-700 text-white font-mono font-bold text-sm rounded px-3 py-1 focus:outline-none focus:ring-2 focus:ring-red-500"
             >
               {stations.map((st) => (
                 <option key={st.id} value={st.id}>
-                  {st.name} ({st.studioName}) [{st.status}]
+                  {st.name} {st.studioName && ' · ' + st.studioName}
                 </option>
               ))}
             </select>
@@ -62,7 +70,7 @@ export function LiveControlPage() {
         </div>
 
         {/* Live Broadcast Tally Controls */}
-        <div className="flex items-center gap-2">
+        {currentStation.ready && <div className="flex items-center gap-2">
           <Button
             variant={isStreaming ? 'tally-pgm' : 'outline'}
             size="sm"
@@ -82,12 +90,20 @@ export function LiveControlPage() {
             <Film className="w-3.5 h-3.5 me-1 text-blue-400" />
             {isRecording ? (t.liveControl?.recActive || 'REC: ACTIVE') : (t.liveControl?.startRec || 'START REC')}
           </Button>
-        </div>
+        </div>}
       </div>
 
       {/* Broadcast Dual Deck: Preview & Program */}
       <IndependentProgram key={currentStation.id} stationId={currentStation.id} language={language}
-        canControl={user.permissions.includes('*') || user.permissions.includes('station:control')} />
+        canControl={canControl} canManage={canManage} />
+      {currentStation.ready ? <details key={currentStation.id} className="space-y-3 rounded-lg border border-zinc-800 p-3">
+      <summary className="cursor-pointer font-semibold">{ar ? 'التحكم عبر OBS' : 'OBS controls'}</summary>
+      {canEmergencyCut && <Button variant="danger" size="sm" disabled={disabled}
+        onClick={() => {
+          if (window.confirm(ar ? 'هل تريد الانتقال إلى مشهد الطوارئ؟' : 'Switch OBS to the emergency scene?')) triggerEmergencyCut();
+        }}>
+        {t.app.emergencyCut}
+      </Button>}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
         {/* PREVIEW DECK (Green Tally) */}
         <div className="lg:col-span-5 flex flex-col">
@@ -107,9 +123,6 @@ export function LiveControlPage() {
                   {t.liveControl?.previewTally || 'PREVIEW'}
                 </span>
                 <ProgramPreview key={currentStation.id} station={currentStation} preview />
-              </div>
-              <div className="absolute top-2 start-2 bg-zinc-950/80 px-2 py-0.5 rounded text-[10px] font-mono text-zinc-400 border border-zinc-800">
-                1080p59.94
               </div>
             </div>
 
@@ -215,9 +228,6 @@ export function LiveControlPage() {
                 </span>
                 <ProgramPreview key={currentStation.id} station={currentStation} />
               </div>
-              <div className="absolute top-2 start-2 bg-red-600 px-2 py-0.5 rounded text-[10px] font-mono text-white font-bold animate-pulse">
-                {t.tally?.streaming || 'LIVE ON-AIR'}
-              </div>
             </div>
 
             {/* Direct Cut Program Bus Scenes */}
@@ -247,6 +257,7 @@ export function LiveControlPage() {
           </div>
         </div>
       </div>
+      </details> : <p className="text-sm text-zinc-400">{ar ? 'OBS غير متصل بهذه المحطة.' : 'OBS is offline for this station.'}</p>}
     </div>
   );
 }

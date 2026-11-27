@@ -1,16 +1,21 @@
 import { z } from 'zod';
-import { OBS_COMMANDS } from '@mcr/shared';
+import { OBS_COMMANDS, STATION_STATUS, STREAM_STATUS } from '@mcr/shared';
 
-export const LoginSchema = z.object({
+export const LoginSchema = z.strictObject({
   email: z.string().email('Invalid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters')
+  password: z.string().min(8, 'Password must be at least 8 characters').max(4096)
 });
 
-export const RefreshTokenSchema = z.object({
-  refreshToken: z.string().optional()
+export const RefreshTokenSchema = z.strictObject({
+  refreshToken: z.string().min(1).max(4096).optional()
 });
 
-export const CreateStationSchema = z.object({
+export const StationListFiltersSchema = z.object({
+  status: z.enum(STATION_STATUS).optional(),
+  streamStatus: z.enum(STREAM_STATUS).optional()
+});
+
+export const CreateStationSchema = z.strictObject({
   name: z.string().min(2).max(100),
   studioId: z.string().uuid().nullable().optional(),
   description: z.string().max(500).optional().default(''),
@@ -19,7 +24,7 @@ export const CreateStationSchema = z.object({
   obsPassword: z.string().max(255).optional()
 });
 
-export const UpdateStationSchema = z.object({
+export const UpdateStationSchema = z.strictObject({
   name: z.string().min(2).max(100).optional(),
   studioId: z.string().uuid().nullable().optional(),
   description: z.string().max(500).optional(),

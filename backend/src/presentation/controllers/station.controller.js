@@ -1,3 +1,4 @@
+import { StationListFiltersSchema } from '@mcr/validation';
 import { RepositoryFactory } from '../../infrastructure/repositories/repository-factory.js';
 import { CryptoService } from '../../infrastructure/security/crypto-service.js';
 import { agentGateway } from '../../infrastructure/agent/agent-gateway.js';
@@ -7,8 +8,12 @@ import { configured, stopProgram } from '../../infrastructure/program/supervisor
 export class StationController {
   static async list(req, res, next) {
     try {
+      const filters = StationListFiltersSchema.safeParse(req.query);
+      if (!filters.success) {
+        return res.status(400).json({ success: false, error: 'Invalid station status filter' });
+      }
       const stationRepo = RepositoryFactory.getStationRepository();
-      const stations = await stationRepo.findByOrganizationId(req.user.organizationId, req.query);
+      const stations = await stationRepo.findByOrganizationId(req.user.organizationId, filters.data);
 
       // Mask sensitive fields: never send raw or encrypted passwords to the frontend
       const sanitized = stations.map((st) => ({

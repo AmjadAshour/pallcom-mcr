@@ -1,3 +1,6 @@
+import { env } from '../../config/env.js';
+import { getSqliteDatabase } from '../database/sqlite.js';
+import { insertAuditEvent } from '../repositories/sqlite-audit-repository.js';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +15,7 @@ import { PROGRAM_CANVAS } from '@mcr/shared';
 import { storedWatermark } from './watermark.js';
 import { storedTicker } from './ticker.js';
 import { createAdRenderer } from './ads.js';
+import { programInputConfig } from './input-config.js';
 import { receiverHealth } from './receiver-health.js';
 
 const worker = fileURLToPath(new URL('./worker.py', import.meta.url));
@@ -132,8 +136,44 @@ export function updateTicker(ticker) {
 }
 let status = { state: 'stopped' };
 
+export function selectedProgramStation() {
+  if (env.STORAGE_MODE !== 'sqlite') return process.env.MCR_PROGRAM_STATION_ID;
+  const db = getSqliteDatabase();
+  const selection = db.prepare('SELECT stationId FROM program_station_selection WHERE singleton=1').get();
+  return selection ? selection.stationId : process.env.MCR_PROGRAM_STATION_ID;
+}
+
 export function configured(id) {
-  return id === process.env.MCR_PROGRAM_STATION_ID;
+  return id === selectedProgramStation();
+}
+
+export function selectProgramStation(id, { organizationId, id: userId }) {
+  if (env.STORAGE_MODE !== 'sqlite') throw failure('Program setup requires SQLite storage', 503);
+  const db = getSqliteDatabase();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const owner = stationId => db.prepare('SELECT organizationId FROM stations WHERE id=?').get(stationId)?.organizationId;
+    if (owner(id) !== organizationId) throw failure('Station not found', 404);
+    const previous = selectedProgramStation();
+    if (previous !== id) {
+      const currentOwner = owner(previous ?? null);
+      if (currentOwner && currentOwner !== organizationId) throw failure('The Program engine is assigned to another organization', 409);
+      if (child || pending) throw failure('Stop Program on the current station before moving it', 409);
+      db.prepare('INSERT INTO program_station_selection VALUES (1,?) ON CONFLICT(singleton) DO UPDATE SET stationId=excluded.stationId').run(id);
+      insertAuditEvent(db, { organizationId, userId, action: 'PROGRAM_STATION_SELECTED', resourceType: 'Station', resourceId: id });
+    } else {
+      db.prepare('INSERT OR IGNORE INTO program_station_selection VALUES (1,?)').run(id);
+    }
+    db.exec('COMMIT');
+    if (previous !== id) {
+      status = { state: 'stopped' };
+      deliveryIncidents = [];
+    }
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  return programStatus(id);
 }
 
 export function programStatus(id) {
@@ -166,7 +206,7 @@ export function setSourceRecovery(session, recovery) {
   if (status.session === session && status.state === 'running') status = { ...status, sourceRecovery: recovery };
 }
 
-function settle(error, data = programStatus(process.env.MCR_PROGRAM_STATION_ID)) {
+function settle(error, data = programStatus(selectedProgramStation())) {
   if (!pending) return;
   clearTimeout(pending.timer);
   if (error) pending.reject(error);
@@ -236,15 +276,15 @@ function start(watermark, ads, ticker) {
   if (recordingDir && !isAbsolute(recordingDir)) throw failure('Program recording directory must be absolute', 503);
   const session = randomUUID();
   const recordingFile = recordingDir ? 'program-' + session + '.ts' : null;
-  const configuredUrl = process.env.MCR_PROGRAM_INPUT_URL;
-  const inputUrl = configuredUrl ? URL.parse(configuredUrl) : null;
-  if (configuredUrl && (!inputUrl || inputUrl.username || inputUrl.password || inputUrl.hash ||
-      (inputUrl.protocol !== 'https:' && !(inputUrl.protocol === 'http:' && inputUrl.hostname === '127.0.0.1')))) {
-    throw failure('Program input URL must use HTTPS or local test HTTP', 503);
-  }
+  const { inputUrl, proxy } = programInputConfig(
+    process.env.MCR_PROGRAM_INPUT_URL, process.env.MCR_PROGRAM_INPUT_EGRESS_PROXY, env.REQUIRE_PRIVATE_SECRETS
+  );
   const input = port(process.env.MCR_PROGRAM_INPUT_PORT || 5100);
   const inputHost = process.env.MCR_PROGRAM_INPUT_HOST || '127.0.0.1';
   if (inputHost !== '127.0.0.1') {
+    if (process.env.MCR_PROGRAM_TRUST_PRIVATE_UDP !== '1') {
+      throw failure('Private UDP ingest requires an explicitly isolated trusted contribution network', 503);
+    }
     const [first, second] = inputHost.split('.').map(Number);
     const privateAddress = first === 10 || (first === 172 && second >= 16 && second <= 31) ||
       (first === 192 && second === 168);
@@ -260,9 +300,9 @@ function start(watermark, ads, ticker) {
   if (autoBackup && !secondPort) throw failure('Automatic backup requires a second Program input', 503);
   const slate = process.env.MCR_PROGRAM_SLATE || 'bars';
   if (input === output || !['black', 'blue', 'bars'].includes(slate)) throw failure('Invalid Program configuration', 503);
-  const env = {};
+  const childEnv = {};
   for (const key of Object.keys(process.env)) {
-    if (/^(path|systemroot|windir|temp|tmp|home|userprofile|localappdata|appdata|lang|ld_library_path|gst_registry|gst_plugin_path)$/i.test(key)) env[key] = process.env[key];
+    if (/^(path|systemroot|windir|temp|tmp|home|userprofile|localappdata|appdata|lang|ld_library_path|gst_registry|gst_plugin_path)$/i.test(key)) childEnv[key] = process.env[key];
   }
   const hlsRoot = process.env.MCR_PROGRAM_HLS_DIR;
   let directory;
@@ -272,7 +312,7 @@ function start(watermark, ads, ticker) {
   }
   hlsDirectory = directory;
   const proc = spawn(process.env.MCR_PROGRAM_PYTHON || 'python', ['-u', worker, String(input), String(output), slate, inputHost],
-    { env, windowsHide: true, stdio: ['pipe', 'pipe', 'inherit'] });
+    { env: childEnv, windowsHide: true, stdio: ['pipe', 'pipe', 'inherit'] });
   child = proc;
   renderer = ads;
   let waitingForAds = false;
@@ -304,7 +344,7 @@ function start(watermark, ads, ticker) {
   reportDelivery('hls', status.hls === 'failed', false);
   const result = waitFor('start');
   proc.stdin.on('error', () => proc.kill());
-  proc.stdin.write(JSON.stringify({ canvas: PROGRAM_CANVAS, ...watermark, ticker, inputUrl: inputUrl?.href,
+  proc.stdin.write(JSON.stringify({ canvas: PROGRAM_CANVAS, ...watermark, ticker, inputUrl: inputUrl?.href, inputProxy: proxy?.href,
     recordingPath: recordingFile ? join(recordingDir, recordingFile) : null,
     audioMonitor: process.env.MCR_PROGRAM_AUDIO_MONITOR !== '0',
     hlsPath: directory,
@@ -362,7 +402,7 @@ function start(watermark, ads, ticker) {
     else if (message.reply === 'unavailable') settle(failure('Contribution signal is unavailable'));
     else if (message.reply === 'sceneUnavailable' && pending?.action === 'scene') settle(failure('Scene media is unreadable'));
   });
-  proc.on('close', () => {
+  proc.on('close', (code, signal) => {
     clearInterval(adTimer);
     if (directory) void cleanHls(directory);
     if (child !== proc) return;
@@ -377,6 +417,7 @@ function start(watermark, ads, ticker) {
     secondInputFrame = null;
     clearTimeout(watchdog);
     const stopped = status.state === 'stopping';
+    if (!stopped) console.warn('Program media worker exited unexpectedly', { code, signal });
     status = { state: stopped ? 'stopped' : 'failed', recordingFile,
       recording: status.recording === 'recording' ? 'interrupted' : status.recording };
     settle(stopped ? undefined : failure('Program worker exited. Check the media runtime.', 503));

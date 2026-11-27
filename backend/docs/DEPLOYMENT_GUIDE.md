@@ -3,7 +3,7 @@
 ## Quick Start (Local Development)
 
 1. Install dependencies with `npm install` on Node.js 22.13 or newer.
-2. Create a local `.env` in the project root and set `MCR_ADMIN_PASSWORD` to your own password of at least 12 characters. Start the backend with `npm run dev:server`. On a fresh database it creates `admin@mcrpro.local`. If the administrator still uses the legacy default password, startup replaces that password with the configured one.
+2. Copy `backend/.env.example` to `backend/.env` and set `MCR_ADMIN_PASSWORD` to your own password of at least 12 characters. Start the backend with `npm run dev:server`. On a fresh database it creates `admin@mcrpro.local`. If the administrator still uses the legacy default password, startup replaces that password with the configured one.
 3. Start the web dashboard with `npm run dev:web` and open `http://localhost:5173`. To serve the production build from the local backend, run `npm run build:web` and open `http://127.0.0.1:4000`.
 4. Sign in, add an OBS station, and pair the Agent using its station-specific code. For the desktop client, keep the local backend running and start the client with `npm run dev:desktop` after building the web dashboard.
 
@@ -19,14 +19,14 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 ```
 Keep the existing private encryption key when redeploying against the same database. If you change it, existing station passwords must be saved again before pairing. Changing the JWT signing key invalidates existing access tokens and Agent pairings.
 
-2. Set `MCR_PUBLIC_ORIGIN` to the exact HTTPS origin (for example `https://mcr.example.org`), and `MCR_TLS_DIRECTORY` to the host directory containing `fullchain.pem` and `privkey.pem`. Set private values for `MYSQL_ROOT_PASSWORD` and `MYSQL_PASSWORD`. Keep the certificate files outside the repository.
+2. Set `MCR_PUBLIC_ORIGIN` to the exact HTTPS origin (for example `https://mcr.example.org`), and `MCR_TLS_DIRECTORY` to the host directory containing `fullchain.pem` and `privkey.pem`. Keep the certificate files outside the repository.
 3. If upgrading an existing deployment, back up the SQLite database and migrate it into the Compose `mcr_sqlite` volume before starting the new stack. Existing dashboard users must sign in again after the session upgrade.
 4. Launch Docker Compose:
 ```bash
 docker compose --env-file .env -f backend/infrastructure/docker/docker-compose.yml up -d --build
 ```
 This provisions:
-- Internal MySQL and Node.js containers. The web application's SQLite data and sessions persist in the `mcr_sqlite` volume.
+- An internal Node.js service with application data and sessions in the `mcr_sqlite` volume. Use `STORAGE_MODE=sqlite` in the current runtime. Prisma's MySQL schema is reserved for the separately planned database work.
 - Nginx serves HTTPS on port 443, redirects port 80 to HTTPS, and proxies Socket.IO and the Agent tunnel over WSS.
 
 For account recovery, use the organization's approved administrative process and verify the operator's identity out of band. Dashboard sessions should be revoked before restoring account access. A dashboard self-service reset and MFA are outside the current deployment workflow.

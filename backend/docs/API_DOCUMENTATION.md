@@ -6,6 +6,7 @@ All REST endpoints are versioned under `/api/v1`.
 
 ### 1. `POST /api/v1/auth/login`
 - **Rate Limit**: 10 attempts per 15 minutes.
+- The request accepts only `email` and `password`. Passwords must contain 8 to 4,096 characters. Invalid shape or length returns HTTP 400.
 - **Request Body**:
   ```json
   {
@@ -28,13 +29,17 @@ All REST endpoints are versioned under `/api/v1`.
     }
   }
   ```
-  *(Also sets HttpOnly `mcr_access_token` and `mcr_refresh_token` cookies)*
+  Login sets HttpOnly `mcr_access_token` and `mcr_refresh_token` cookies. The example shows the JSON response for a programmatic client that sends neither browser origin headers (`Origin` or `Sec-Fetch-Site`) nor session cookies. Browser and cookie-based clients receive `success` and `user` and authenticate through the cookies.
 
 ### 2. `POST /api/v1/auth/refresh`
 - Rotates access token and refresh token.
+- Cookie clients can send an empty body. An originless programmatic client using JSON sends one `refreshToken` string of 1 to 4,096 characters. Invalid types, oversized values and extra JSON fields return HTTP 401 without rotating the session. A supplied refresh cookie takes precedence over JSON.
+- Browser and cookie-based clients receive `{ "success": true }` and the rotated HttpOnly cookies. Programmatic clients satisfying the login header and cookie conditions also receive `accessToken` in JSON.
 
 ### 3. `POST /api/v1/auth/logout`
 - Revokes active session, clears cookies, records audit entry.
+
+The authentication router sends `Cache-Control: no-store` on its responses.
 
 ---
 

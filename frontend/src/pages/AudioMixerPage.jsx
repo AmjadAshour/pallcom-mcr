@@ -3,8 +3,8 @@ import { useOutletContext } from 'react-router-dom';
 import { useMcrStore } from '../context/useMcrStore.js';
 import { ProgramAudioControls } from '../components/ProgramAudioControls.jsx';
 import { translations } from '../i18n/translations.js';
-import { Card, CardHeader, CardTitle, CardContent, Button, AudioMeter } from '@mcr/ui';
-import { Volume2, VolumeX, Mic, Music, Radio } from 'lucide-react';
+import { Button, AudioMeter } from '@mcr/ui';
+import { Volume2, VolumeX, Mic } from 'lucide-react';
 
 export function AudioMixerPage() {
   const { language, stations, selectedStationId, selectStation, setInputVolume, setInputMute, pending } = useMcrStore();
@@ -27,7 +27,7 @@ export function AudioMixerPage() {
             <h1 className="text-base font-bold font-mono text-white uppercase tracking-wide">
               {t.audio.title}
             </h1>
-            <p className="text-xs text-zinc-400">{language === 'ar' ? 'مستويات الصوت والتحكم في مداخل OBS' : 'OBS input levels, faders, and mute'}</p>
+            <p className="text-xs text-zinc-400">{language === 'ar' ? 'مراقبة مستويات الصوت وضبط مزيج البث' : 'Monitor levels and adjust the Program mix'}</p>
           </div>
         </div>
 
@@ -45,7 +45,8 @@ export function AudioMixerPage() {
       </div>
 
       <ProgramAudioControls key={currentStation.id} stationId={currentStation.id} language={language} canControl={canControl} />
-      {/* Multitrack Mixing Console Strips */}
+      {currentStation.ready && currentStation.audioInputs.length > 0 && <details className="rounded border border-zinc-800 p-3">
+      <summary className="cursor-pointer font-semibold">{language === 'ar' ? 'مداخل صوت OBS' : 'OBS audio inputs'}</summary>
       <div className="flex gap-4 overflow-x-auto pb-4 pt-2">
         {currentStation.audioInputs.map((input) => {
           const isMaster = input.name.toLowerCase().includes('master');
@@ -124,6 +125,7 @@ export function AudioMixerPage() {
           );
         })}
       </div>
+      </details>}
     </div>
   );
 }

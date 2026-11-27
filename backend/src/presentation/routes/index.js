@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AutomationController } from '../controllers/automation.controller.js';
-import { independentAudioMonitor, independentHls, independentMonitor, independentProgram, reportProgramReceiver } from '../controllers/program.controller.js';
+import { authorizePlayback, configureIndependentProgram, createPlaybackLink, independentAudioMonitor, independentHls, independentMonitor, independentProgram, reportProgramReceiver } from '../controllers/program.controller.js';
 import { programInputAudioSchema } from '../../infrastructure/program/supervisor.js';
 import { RepositoryFactory } from '../../infrastructure/repositories/repository-factory.js';
 import { CryptoService } from '../../infrastructure/security/crypto-service.js';
@@ -14,7 +14,7 @@ import { AuditController } from '../controllers/audit.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { authorize } from '../middlewares/rbac.middleware.js';
 import { validateBody } from '../middlewares/validate.middleware.js';
-import { accountLoginLimiter, authLimiter } from '../middlewares/rate-limiter.middleware.js';
+import { accountLoginLimiter, authLimiter, pairingClaimLimiter } from '../middlewares/rate-limiter.middleware.js';
 
 import {
   LoginSchema,
@@ -26,6 +26,11 @@ import {
 } from '@mcr/validation';
 
 export const apiRouter = Router();
+
+apiRouter.use(['/auth', '/users', '/logs'], (_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 
 // Authentication Endpoints
 apiRouter.post('/auth/login', authLimiter, validateBody(LoginSchema), accountLoginLimiter, AuthController.login);
@@ -43,13 +48,15 @@ apiRouter.get('/users', authenticate, authorize('user:manage'), async (req, res,
 apiRouter.post('/users', authenticate, authorize('user:manage'), validateBody(z.object({
   fullName: z.string().trim().min(2).max(120), email: z.string().email(),
   password: z.string().min(12).max(128), role: z.enum(['STUDIO_MANAGER', 'OPERATOR', 'VIEWER'])
-})), async (req, res, next) => {
+}).strict()), async (req, res, next) => {
   try {
     const { password, ...values } = req.body;
     const repository = RepositoryFactory.getUserRepository();
     if (await repository.findByEmail(values.email)) return res.status(409).json({ success: false, error: 'Email is already registered' });
     const passwordHash = await CryptoService.hashPassword(password);
-    await repository.create({ ...values, passwordHash, organizationId: req.user.organizationId });
+    await repository.create({ ...values, passwordHash, organizationId: req.user.organizationId }, {
+      actor: { id: req.user.id, ipAddress: req.ip }
+    });
     res.status(201).json({ success: true });
   } catch (error) {
     next(error);
@@ -64,12 +71,19 @@ apiRouter.patch('/stations/:id', authenticate, authorize('station:manage'), vali
 apiRouter.delete('/stations/:id', authenticate, authorize('station:manage'), StationController.delete);
 
 // OBS Control Endpoints (RBAC protected)
+apiRouter.put('/stations/:id/program/selection', authenticate, authorize('station:manage'), configureIndependentProgram);
 apiRouter.get('/stations/:id/program', authenticate, authorize('station:read'), independentProgram);
 apiRouter.post('/stations/:id/program/receivers/:destination',
   validateBody(z.object({ video: z.boolean(), audio: z.boolean() }).strict()), reportProgramReceiver);
 apiRouter.get(['/stations/:id/program/input-preview', '/stations/:id/program/program-monitor'],
   authenticate, authorize('station:read'), independentMonitor);
 apiRouter.get('/stations/:id/program/audio-monitor', authenticate, authorize('station:read'), independentAudioMonitor);
+apiRouter.use('/stations/:id/program/hls', (_req, res, next) => {
+  res.set({ 'Cache-Control': 'private, no-store', 'Referrer-Policy': 'no-referrer' });
+  next();
+});
+apiRouter.post('/stations/:id/program/hls/playback-link', authenticate, authorize('station:control'), createPlaybackLink);
+apiRouter.get('/stations/:id/program/hls/:session/play/:ticket/:filename', authorizePlayback, independentHls);
 apiRouter.get('/stations/:id/program/hls/:session/:filename', authenticate, authorize('station:read'), independentHls);
 apiRouter.post('/stations/:id/program', authenticate, authorize('station:control'),
   validateBody(z.union([
@@ -119,7 +133,7 @@ apiRouter.post('/stations/:id/studio-mode/transition', authenticate, authorize('
 // Device Pairing Endpoints
 apiRouter.post('/pairing/generate', authenticate, authorize('station:manage'),
   validateBody(z.object({ stationId: z.string().min(1).max(100) }).strict()), PairingController.generate);
-apiRouter.post('/pairing/claim', authLimiter, validateBody(z.object({
+apiRouter.post('/pairing/claim', pairingClaimLimiter, validateBody(z.object({
   pairingCode: z.string().regex(/^MCR-[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{4}$/),
   machineHostname: z.string().max(255).optional(), osPlatform: z.string().max(64).optional(),
   agentVersion: z.string().max(64).optional()

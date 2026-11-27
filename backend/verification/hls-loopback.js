@@ -23,9 +23,12 @@ Object.assign(process.env, {
 const { server } = await import('../src/index.js');
 const { RepositoryFactory: repo } = await import('../src/infrastructure/repositories/repository-factory.js');
 const { CryptoService } = await import('../src/infrastructure/security/crypto-service.js');
-const { createSession } = await import('../src/infrastructure/security/session-service.js');
+const { createSession, revokeSession } = await import('../src/infrastructure/security/session-service.js');
 const { forwardProgram } = await import('../src/infrastructure/program/runtime-proxy.js');
 const station = await repo.getStationRepository().create({ name:'HLS fixture', organizationId:'isolated', encryptedPassword:'unused' });
+const siblingStation = await repo.getStationRepository().create({
+  name:'Other station in the same organization', organizationId:station.organizationId, encryptedPassword:'unused'
+});
 process.env.MCR_PROGRAM_STATION_ID = station.id;
 async function token(role, organizationId) {
   const user = await repo.getUserRepository().create({
@@ -59,6 +62,10 @@ function receiver(url, auth) {
   '-f','rawvideo','pipe:1','-map','0:a','-f','s16le','pipe:3'],
   { windowsHide:true, stdio:['ignore','pipe','pipe','pipe'] });
   const sample = { child, videoBytes:0, audioBytes:0, blue:false, error:'' };
+  child.once('exit', (code, signal) => {
+    if (child.killed || code === 0) return;
+    console.error(auth || url.startsWith('http') ? 'HLS receiver exited' : 'UDP receiver exited', { code, signal });
+  });
   let remainder = Buffer.alloc(0);
   child.stdout.on('data', bytes => {
     sample.videoBytes += bytes.length;
@@ -83,15 +90,35 @@ async function until(label, pass) {
 }
 const udp = receiver('udp://127.0.0.1:25532');
 let hls;
+async function closeReceiver(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const closed = once(child, 'close');
+  child.kill();
+  await closed;
+}
+function assertPrivacy(response) {
+  assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+}
 try {
+  process.env.MCR_PROGRAM_INPUT_HOST = '192.0.2.1';
+  process.env.MCR_PROGRAM_TRUST_PRIVATE_UDP = '0';
+  const untrustedUdp = await fetch(root, {
+    method:'POST', headers:headers(operator), body:JSON.stringify({ action:'start' }),
+  });
+  assert.equal(untrustedUdp.status, 503);
+  assert.equal((await untrustedUdp.json()).error, 'Service unavailable');
+  process.env.MCR_PROGRAM_INPUT_HOST = '127.0.0.1';
   const { session } = await program('start');
   const playlist = root + '/hls/' + session + '/index.m3u8';
   await until('Authenticated HLS playlist becomes ready', async () => (await program()).hls === 'ready');
-  assert.equal((await fetch(playlist)).status, 401);
+  const unauthenticated = await fetch(playlist);
+  assert.equal(unauthenticated.status, 401);
+  assertPrivacy(unauthenticated);
   assert.equal((await fetch(playlist, { headers:headers(outsider) })).status, 404);
   const response = await fetch(playlist, { headers:headers(viewer) });
   assert.match(response.headers.get('content-type'), /application\/vnd\.apple\.mpegurl/);
-  assert.match(response.headers.get('cache-control'), /private.*no-store/);
+  assertPrivacy(response);
   const manifest = await response.text();
   assert.match(manifest, /^#EXTM3U/);
   const segment = manifest.match(/^segment\d{5,10}\.ts\r?$/m)?.[0].trim();
@@ -99,6 +126,7 @@ try {
   assert.equal((await fetch(new URL(segment, playlist))).status, 401);
   const range = await fetch(new URL(segment, playlist), { headers:{ ...headers(viewer), Range:'bytes=0-187' } });
   assert.equal(range.status, 206);
+  assertPrivacy(range);
   assert.equal((await range.arrayBuffer()).byteLength, 188);
   const validSegment = await fetch(new URL(segment, playlist), { headers:headers(viewer) });
   assert.equal(validSegment.status, 200);
@@ -121,7 +149,34 @@ try {
   assert.equal((await inspectTransport(damagedPath)).continuityErrors, 1);
   console.log('Captured Program transport continuity and loss detection passed');
   assert.equal((await fetch(new URL('..%2f..%2ftest.sqlite', playlist), { headers:headers(viewer) })).status, 404);
-  hls = receiver(playlist, viewer);
+  const mint = root + '/hls/playback-link';
+  assert.equal((await fetch(mint, { method:'POST' })).status, 401);
+  assert.equal((await fetch(mint, { method:'POST', headers:headers(viewer) })).status, 403);
+  const link = await fetch(mint, { method:'POST', headers:headers(operator) });
+  assert.equal(link.status, 200);
+  assertPrivacy(link);
+  const { data } = await link.json();
+  const playback = new URL(data.path, root);
+  const ticket = playback.pathname.split('/').at(-2);
+  const signedPlaylist = await fetch(playback);
+  assert.equal(signedPlaylist.status, 200);
+  assertPrivacy(signedPlaylist);
+  await signedPlaylist.text();
+  assert.equal((await fetch(new URL(segment, playback))).status, 200);
+  const otherStation = new URL(playback.href.replace('/stations/' + station.id + '/', '/stations/' + siblingStation.id + '/'));
+  const otherSession = new URL(playback.href.replace('/hls/' + session + '/', '/hls/other-session/'));
+  for (const invalidScope of [otherStation, otherSession]) {
+    for (const path of [invalidScope, new URL(segment, invalidScope)]) {
+      const response = await fetch(path);
+      assert.equal(response.status, 404);
+      assertPrivacy(response);
+      await response.arrayBuffer();
+    }
+  }
+  console.log('Signed HLS is scoped to station and session for playlists and segments');
+  assert.equal((await fetch(playback.href.replace(ticket, 'invalid-token'))).status, 401);
+  assert.equal((await fetch('http://127.0.0.1:' + server.address().port + '/api/v1/auth/me', { headers:headers(ticket) })).status, 401);
+  hls = receiver(playback.href);
   await until('HLS and UDP decode Program video and audio independently', () =>
     hls.blue && hls.videoBytes > 45 && hls.audioBytes > 12000 && udp.blue && udp.audioBytes > 12000);
   await until('HLS live window advances', async () => {
@@ -131,10 +186,20 @@ try {
   const segmentDirectory = readdirSync(directory).find(name => name.startsWith('program-hls-'));
   assert(segmentDirectory);
   assert(readdirSync(join(directory, segmentDirectory)).filter(name => name.endsWith('.ts')).length <= 7);
+  const temporaryOperator = await token('ORG_ADMIN', 'isolated');
+  const revokedLink = await fetch(mint, { method:'POST', headers:headers(temporaryOperator) });
+  assert.equal(revokedLink.status, 200);
+  const { data: revoked } = await revokedLink.json();
+  const claims = CryptoService.verifyAccessToken(temporaryOperator);
+  revokeSession(claims.sid, claims.sub);
+  const denied = await fetch(new URL(revoked.path, root));
+  assert.equal(denied.status, 401);
+  assertPrivacy(denied);
   await program('stop');
+  assert.equal((await fetch(playback)).status, 404);
   assert.equal((await fetch(playlist, { headers:headers(viewer) })).status, 404);
   await until('HLS session files are cleaned after stop', () => !readdirSync(directory).includes(segmentDirectory));
-  hls.child.kill();
+  await closeReceiver(hls.child);
   const blocked = await program('start');
   assert.equal(blocked.hls, 'starting');
   const staging = readdirSync(directory).find(name => name.startsWith('program-hls-'));
@@ -159,11 +224,11 @@ try {
   await until('UDP continues with an unavailable HLS destination', () => udp.videoBytes > previous + 90);
   console.log('HLS receiver and output isolation passed');
 } finally {
-  hls?.child.kill();
-  udp.child.kill();
+  const receivers = Promise.all([closeReceiver(hls?.child), closeReceiver(udp.child)]);
   await program('stop');
   proxy.closeAllConnections();
   await new Promise(resolve => proxy.close(resolve));
   server.closeAllConnections();
   await new Promise(resolve => server.close(resolve));
+  await receivers;
 }

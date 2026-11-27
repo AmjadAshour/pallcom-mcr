@@ -14,7 +14,9 @@ export function forwardProgram(port) {
   return (req, res, next) => {
     if (!programPath.test(req.path)) return next();
     const headers = {};
-    for (const name of ['authorization', 'cookie', 'content-type', 'content-length', 'range', 'if-range']) {
+    const forwarded = ['authorization', 'cookie', 'content-type', 'content-length', 'range', 'if-range'];
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) forwarded.push('origin', 'sec-fetch-site', 'host');
+    for (const name of forwarded) {
       if (req.headers[name] !== undefined) headers[name] = req.headers[name];
     }
     const upstream = http.request({
@@ -22,7 +24,8 @@ export function forwardProgram(port) {
       timeout: 220000
     }, response => {
       res.statusCode = response.statusCode;
-      for (const name of ['content-type', 'content-length', 'content-disposition', 'cache-control', 'content-range', 'accept-ranges', 'x-accel-buffering']) {
+      for (const name of ['content-type', 'content-length', 'content-disposition', 'cache-control', 'referrer-policy',
+        'content-range', 'accept-ranges', 'x-accel-buffering']) {
         if (response.headers[name] !== undefined) res.setHeader(name, response.headers[name]);
       }
       response.on('error', () => res.destroy());

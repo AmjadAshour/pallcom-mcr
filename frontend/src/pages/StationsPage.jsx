@@ -3,12 +3,13 @@ import { useNavigate, useOutletContext } from 'react-router-dom';
 import { api } from '../context/api.js';
 import { useMcrStore } from '../context/useMcrStore.js';
 import { translations } from '../i18n/translations.js';
-import { Card, CardHeader, CardTitle, CardContent, Button, StatusBadge, TallyIndicator } from '@mcr/ui';
-import { Radio, Activity, Film, Cpu, HardDrive, Wifi, Plus, Key, Trash2 } from 'lucide-react';
+import { Card, Button, StatusBadge, TallyIndicator } from '@mcr/ui';
+import { Plus, Key, Trash2 } from 'lucide-react';
 
 export function StationsPage() {
-  const { language, stations, toggleStream, toggleRecord, selectStation, synchronize, pending, deleteStation } = useMcrStore();
+  const { language, stations, selectStation, synchronize, pending, deleteStation } = useMcrStore();
   const t = translations[language] || translations.en;
+  const ar = language === 'ar';
   const [filter, setFilter] = useState('ALL'); // ALL, ONLINE, STREAMING
 
   const navigate = useNavigate();
@@ -41,7 +42,7 @@ export function StationsPage() {
     setError('');
     try {
       await api('/stations', { method: 'POST', body: {
-        name: form.get('name'), obsPort: Number(form.get('port')), obsPassword: form.get('password')
+        name: form.get('name')
       } });
       setAdding(false);
       await synchronize();
@@ -64,9 +65,9 @@ export function StationsPage() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
         <div>
           <h1 className="text-lg font-bold font-mono tracking-wide text-white uppercase">
-            {t.stations.title}
+            {t.nav.stations}
           </h1>
-          <p className="text-xs text-zinc-400">{t.stations?.subtitle || 'Manage and monitor all connected OBS Studio machines.'}</p>
+          <p className="text-xs text-zinc-400">{ar ? 'أنشئ المحطات وافتح التحكم المباشر.' : 'Create stations and open their live controls.'}</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -103,10 +104,10 @@ export function StationsPage() {
       </div>
 
       {adding && <form onSubmit={addStation} className="flex flex-wrap items-end gap-3 rounded border border-zinc-800 p-3">
-        <label>Station name<input className="block rounded bg-zinc-800 p-2" name="name" minLength={2} required /></label>
-        <label>OBS port<input className="block rounded bg-zinc-800 p-2" type="number" name="port" min="1" max="65535" defaultValue="4455" required /></label>
-        <label>OBS WebSocket password<input className="block rounded bg-zinc-800 p-2" type="password" name="password" autoComplete="new-password" /></label>
-        <Button type="submit" disabled={saving}>Save station</Button>
+        <label>{ar ? 'اسم المحطة' : 'Station name'}
+          <input className="block rounded bg-zinc-800 p-2" name="name" minLength={2} maxLength={100} required />
+        </label>
+        <Button type="submit" disabled={saving}>{ar ? 'حفظ المحطة' : 'Save station'}</Button>
         {error && <p role="alert">{error}</p>}
       </form>}
       {deleteError && <p role="alert" className="text-sm text-red-400">{deleteError}</p>}
@@ -114,7 +115,6 @@ export function StationsPage() {
         {filteredStations.map((st) => {
           const isOnline = st.status === 'ONLINE';
           const isStreaming = st.streamStatus === 'STREAMING';
-          const isRecording = st.recordStatus === 'RECORDING';
 
           return (
             <Card
@@ -179,30 +179,6 @@ export function StationsPage() {
               {/* Action Buttons */}
               <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-zinc-800/60">
                 <div className="flex items-center gap-2">
-                  <Button
-                    variant={isStreaming ? 'tally-pgm' : 'outline'}
-                    size="sm"
-                    
-                    onClick={() => toggleStream(st.id)} disabled={!st.ready || pending[st.id] || !can('station:control')}
-                    className="text-xs font-mono"
-                  >
-                    <Activity className="w-3.5 h-3.5 me-1" />
-                    {isStreaming ? (t.stations?.stopStream || 'STOP STREAM') : (t.stations?.startStream || 'START STREAM')}
-                  </Button>
-
-                  <Button
-                    variant={isRecording ? 'secondary' : 'outline'}
-                    size="sm"
-                    
-                    onClick={() => toggleRecord(st.id)} disabled={!st.ready || pending[st.id] || !can('station:control')}
-                    className="text-xs font-mono"
-                  >
-                    <Film className="w-3.5 h-3.5 me-1 text-blue-400" />
-                    {isRecording ? (t.stations?.stopRec || 'STOP REC') : (t.stations?.rec || 'REC')}
-                  </Button>
-                </div>
-
-                <div className="flex items-center gap-2">
                 {can('station:manage') && (
                   <Button variant="outline" size="sm" onClick={() => navigate('/settings?pair=' + encodeURIComponent(st.id))}
                     aria-label={`${t.stations.pairAgent} · ${st.name}`} className="text-xs">
@@ -216,7 +192,7 @@ export function StationsPage() {
                   onClick={() => { selectStation(st.id); navigate('/live'); }}
                   className="text-xs font-mono"
                 >
-                  {t.stations?.switchToDeck || 'Switch To Deck'}
+                  {ar ? 'فتح التحكم المباشر' : 'Open Live Control'}
                 </Button>
                 {can('station:manage') && (
                   <Button variant="danger" size="sm" disabled={pending[st.id]}

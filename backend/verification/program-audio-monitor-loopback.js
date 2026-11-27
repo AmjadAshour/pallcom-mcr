@@ -23,6 +23,8 @@ const { server } = await import('../src/index.js');
 const { RepositoryFactory: repo } = await import('../src/infrastructure/repositories/repository-factory.js');
 const { CryptoService } = await import('../src/infrastructure/security/crypto-service.js');
 const { createSession, revokeSession } = await import('../src/infrastructure/security/session-service.js');
+const { getSqliteDatabase } = await import('../src/infrastructure/database/sqlite.js');
+const { default: jwt } = await import('jsonwebtoken');
 const station = await repo.getStationRepository().create({
   name: 'Audio monitor fixture', organizationId: 'fixture', encryptedPassword: 'unused',
 });
@@ -63,13 +65,17 @@ function ffmpeg(args, stdio) {
 function receive(input, options = []) {
   const child = ffmpeg([...options, '-analyzeduration','500000','-probesize','8192','-i',input,
     '-map','0:a','-ac','1','-ar','8000','-f','s16le','pipe:1'], ['ignore','pipe','ignore']);
-  const feed = { level:0, bytes:0, child };
+  const feed = { level:0, bytes:0, energy:0, child };
+  let carry = Buffer.alloc(0);
   child.stdout.on('data', chunk => {
-    const count = Math.floor(chunk.length / 2);
+    const pcm = carry.length ? Buffer.concat([carry, chunk]) : chunk;
+    const count = Math.floor(pcm.length / 2);
     let sum = 0;
-    for (let i = 0; i < count; i++) sum += chunk.readInt16LE(i * 2) ** 2;
+    for (let i = 0; i < count; i++) sum += pcm.readInt16LE(i * 2) ** 2;
     if (count) feed.level = Math.sqrt(sum / count);
+    feed.energy += sum;
     feed.bytes += count * 2;
+    carry = pcm.subarray(count * 2);
   });
   return feed;
 }
@@ -80,6 +86,16 @@ async function until(label, check) {
     await sleep(100);
   }
   console.log(label);
+}
+async function measureRms(...feeds) {
+  const start = feeds.map(({ bytes, energy }) => ({ bytes, energy }));
+  const deadline = Date.now() + 5000;
+  while (!feeds.every((feed, index) => feed.bytes - start[index].bytes >= 16000)) {
+    assert(Date.now() < deadline, 'One-second PCM measurement timed out');
+    await sleep(100);
+  }
+  return feeds.map((feed, index) =>
+    Math.sqrt(2 * (feed.energy - start[index].energy) / (feed.bytes - start[index].bytes)));
 }
 let browser;
 try {
@@ -122,17 +138,48 @@ try {
   await until('Both receivers decode silence after Program mute', () => udp.level < 10 && mp3.level < 10);
   await action('unmute');
   await until('Both receivers decode sound after restoration', () => udp.level > 500 && mp3.level > 500);
-  const beforeGain = { udp:udp.level, mp3:mp3.level };
+  const [beforeUdp, beforeMp3] = await measureRms(udp, mp3);
   await action('gain', { gainDb:-12 });
   const attenuated = (level, baseline) => level / baseline > 0.20 && level / baseline < 0.32;
-  await until('Both receivers measure the applied Program attenuation', () =>
-    attenuated(udp.level, beforeGain.udp) && attenuated(mp3.level, beforeGain.mp3));
+  await until('Both receivers measure the applied Program attenuation', async () => {
+    const [afterUdp, afterMp3] = await measureRms(udp, mp3);
+    return attenuated(afterUdp, beforeUdp) && attenuated(afterMp3, beforeMp3);
+  });
   await action('gain', { gainDb:0 });
   await until('Both receivers recover from attenuation', () => udp.level > 500 && mp3.level > 500);
   revokeSession(viewer.sessionId, viewer.userId);
   await until('Revoked session closes the MP3 stream while UDP continues', () =>
     mp3.child.exitCode !== null && udp.level > 500);
   assert.equal((await status()).session, session);
+  async function checkMonitorClosure(label, memberToken, invalidate, expectedStatus) {
+    const response = await fetch(monitor, { headers:headers(memberToken), signal:AbortSignal.timeout(8000) });
+    assert.equal(response.status, 200, label);
+    const reader = response.body.getReader();
+    assert.equal((await reader.read()).done, false, label);
+    const bytes = udp.bytes;
+    invalidate();
+    while (!(await reader.read()).done) {
+      // Consume buffered MP3 until the server closes the connection.
+    }
+    assert.equal((await fetch(monitor, { headers:headers(memberToken) })).status, expectedStatus, label);
+    assert.equal((await status()).session, session, label);
+    assert(udp.bytes > bytes, label);
+    console.log(label);
+  }
+  const shortLivedToken = jwt.sign({ sub:operator.userId, sid:operator.sessionId },
+    process.env.JWT_SECRET, { expiresIn:3, issuer:'MCR_PRO', audience:'mcr_client' });
+  await checkMonitorClosure('Access token expiry closes MP3 and rejects reconnection', shortLivedToken, () => {}, 401);
+  assert.equal((await fetch(monitor, { headers:headers(viewer.token) })).status, 401);
+  const db = getSqliteDatabase();
+  const expires = await member('STUDIO_MANAGER', 'fixture');
+  await checkMonitorClosure('Session expiry closes MP3', expires.token,
+    () => db.prepare('UPDATE auth_sessions SET expiresAt=0 WHERE id=?').run(expires.sessionId), 401);
+  const changesRole = await member('ORG_ADMIN', 'fixture');
+  await checkMonitorClosure('Loss of station-read permission closes MP3', changesRole.token,
+    () => db.prepare("UPDATE users SET role='UNKNOWN' WHERE id=?").run(changesRole.userId), 403);
+  const movesOrganization = await member('SUPER_ADMIN', 'fixture');
+  await checkMonitorClosure('Organization change closes MP3', movesOrganization.token,
+    () => db.prepare("UPDATE users SET organizationId='other' WHERE id=?").run(movesOrganization.userId), 404);
   const connection = await fetch(monitor, { headers:headers(operator.token) });
   assert.equal(connection.headers.get('content-type'), 'audio/mpeg');
   assert.match(connection.headers.get('cache-control'), /no-store/);
