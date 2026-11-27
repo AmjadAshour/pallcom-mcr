@@ -110,9 +110,10 @@ restricted=("${container[@]}" --user 1000:1000 --cap-drop ALL --security-opt no-
 "${legacy_root[@]}" -i -e NODE_ENV=test -e STORAGE_MODE=sqlite -e SQLITE_DB_PATH=/legacy/mcr_local.db \
   "$media_image" sh -ec 'umask 077; chmod 0700 /legacy; node --input-type=module' <<'JS'
 import { getSqliteDatabase } from './backend/src/infrastructure/database/sqlite.js';
-const db = getSqliteDatabase();
-db.prepare('INSERT INTO stations (id, name, organizationId) VALUES (?, ?, ?)').run('fixture', 'Before restore', 'fixture-org');
-db.close();
+import { SqliteStationRepository } from './backend/src/infrastructure/repositories/sqlite-station-repository.js';
+const stations = new SqliteStationRepository();
+await stations.create({ id: 'fixture', name: 'Before restore', organizationId: 'fixture-org' });
+getSqliteDatabase().close();
 JS
 legacy_digest=$("${container[@]}" --user 0:0 "${legacy_read_only[@]}" "$media_image" sha256sum /legacy/mcr_local.db)
 "${restricted[@]}" -i "${legacy_read_only[@]}" "$media_image" node --input-type=module <<'JS'
