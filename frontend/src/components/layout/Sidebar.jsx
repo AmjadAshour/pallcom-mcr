@@ -17,7 +17,7 @@ import {
   Settings
 } from 'lucide-react';
 
-export function Sidebar() {
+export function Sidebar({ permissions }) {
   const { language } = useMcrStore();
   const t = translations[language] || translations.en;
 
@@ -28,16 +28,16 @@ export function Sidebar() {
     { to: '/multiview', label: t.nav.multiview, icon: Grid },
     { to: '/audio', label: t.nav.audioMixer, icon: Volume2 },
     { to: '/sources', label: t.nav.sourcesScenes, icon: Layers },
-    { to: '/graphics', label: t.nav.graphics, icon: Sparkles },
-    { to: '/macros', label: t.nav.macros, icon: Zap },
-    { to: '/scheduler', label: t.nav.scheduler, icon: Calendar },
-    { to: '/logs', label: t.nav.activityLogs, icon: FileText },
-    { to: '/users', label: t.nav.usersPermissions, icon: Users },
+    { to: '/graphics', label: t.nav.graphics, icon: Sparkles, permission: 'station:control' },
+    { to: '/macros', label: t.nav.macros, icon: Zap, permission: 'station:control' },
+    { to: '/scheduler', label: t.nav.scheduler, icon: Calendar, permission: 'station:control' },
+    { to: '/logs', label: t.nav.activityLogs, icon: FileText, permission: 'audit:read' },
+    { to: '/users', label: t.nav.usersPermissions, icon: Users, permission: 'user:manage' },
     { to: '/settings', label: t.nav.settings, icon: Settings }
-  ];
+  ].filter(({ permission }) => !permission || permissions.includes('*') || permissions.includes(permission));
 
   return (
-    <aside className="w-56 border-e border-zinc-800 bg-zinc-950 flex flex-col justify-between py-3 select-none shrink-0">
+    <aside className="w-56 overflow-y-auto border-e border-zinc-800 bg-zinc-950 py-3 select-none shrink-0">
       <nav className="space-y-0.5 px-2">
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -60,17 +60,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-
-      {/* Operator Session Info */}
-      <div className="px-3 pt-3 border-t border-zinc-900 mx-2">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <div className="overflow-hidden">
-            <p className="text-[11px] font-mono text-zinc-300 font-bold truncate">{t.nav?.leadOperator || 'OP-AMJAD'}</p>
-            <p className="text-[10px] font-mono text-zinc-500 uppercase">{t.nav?.operatorRole || 'SUPER ADMIN'}</p>
-          </div>
-        </div>
-      </div>
     </aside>
   );
 }

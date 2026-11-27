@@ -11,7 +11,7 @@ export function DashboardLayout({ user, logout, error }) {
       <Header permissions={user.permissions} />
       <div className="flex items-center justify-end gap-3 border-b border-zinc-800 px-4 py-1 text-xs"><span>{user.email}</span><button className="underline" onClick={logout}>Sign out</button></div>
       <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
+        <Sidebar permissions={user.permissions} />
         <main className="flex-1 overflow-y-auto p-4 bg-zinc-950/95 relative">
           {(error || connectionError || commandError) && <p role="alert" className="mb-3 text-red-300">{error || connectionError || commandError}</p>}
           {Object.values(pending).some(Boolean) && <p role="status" className="mb-3 text-cyan-300">Waiting for OBS…</p>}
