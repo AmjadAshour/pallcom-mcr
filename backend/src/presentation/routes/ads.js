@@ -111,7 +111,7 @@ function save(req, plan, action, details) {
     .run(req.params.id, JSON.stringify(plan));
   audit(req, action, { ...details, revision: plan.revision });
 }
-adsRouter.use(root, authenticate, authorize('station:control'), (req, res, next) => {
+adsRouter.use(root, authenticate, authorize('advertising:manage'), (req, res, next) => {
   if (!owns(req)) return res.sendStatus(404);
   res.set('Cache-Control', 'private, no-store');
   next();
@@ -128,6 +128,7 @@ adsRouter.get(root + '/assets/:asset/media', (req, res) => {
 });
 adsRouter.post(
   root + '/assets',
+  authorize('media:upload'),
   mediaUploadLimiter,
   async (req, res, next) => {
     const id = req.params.id;
@@ -151,7 +152,8 @@ adsRouter.post(
         fail('Unreadable image or MP4; video limit is 30 seconds');
       }
       if (res.destroyed) return;
-      if (!hasCurrentPermission(req.user, 'station:control')) return res.sendStatus(403);
+      if (!hasCurrentPermission(req.user, 'advertising:manage') ||
+          !hasCurrentPermission(req.user, 'media:upload')) return res.sendStatus(403);
       if (!owns(req)) return res.sendStatus(404);
       const asset = transaction(() => {
         const asset = storeCreative(db(), id, name.data, prepared);
@@ -171,7 +173,7 @@ adsRouter.post(
     }
   }
 );
-adsRouter.delete(root + '/assets/:asset', (req, res) => {
+adsRouter.delete(root + '/assets/:asset', authorize('media:delete'), (req, res) => {
   const id = req.params.id,
     asset = req.params.asset;
   transaction(() => {

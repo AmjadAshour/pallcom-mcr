@@ -5,6 +5,7 @@ import { useMcrStore } from '../context/useMcrStore.js';
 import { translations } from '../i18n/translations.js';
 import { Card, CardHeader, CardTitle, CardContent, Button, Input } from '@mcr/ui';
 import { Settings, Key, Server, RefreshCw, Copy, Check } from 'lucide-react';
+import { AccountSettings } from '../components/AccountSettings.jsx';
 
 export function SettingsPage() {
   const { language, selectedStationId, stations, synchronize } = useMcrStore();
@@ -125,6 +126,7 @@ export function SettingsPage() {
         </div>
       </div>
 
+      <AccountSettings user={user} language={language} />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Device Pairing Generator */}
         <Card className="border border-zinc-800">

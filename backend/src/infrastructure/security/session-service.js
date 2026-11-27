@@ -12,9 +12,9 @@ function issue(id, userId) {
 }
 
 export function createSession(userId) {
+  const db = getSqliteDatabase();
   const id = randomUUID();
   const tokens = issue(id, userId);
-  const db = getSqliteDatabase();
   db.prepare('DELETE FROM auth_sessions WHERE expiresAt <= ?').run(Date.now());
   db.prepare('INSERT INTO auth_sessions VALUES (?, ?, ?, ?)').run(id, userId, tokens.hash, tokens.expiresAt);
   return { id, ...tokens };

@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import { OBS_COMMANDS, STATION_STATUS, STREAM_STATUS } from '@mcr/shared';
 
+export const SecondFactorSchema = z.string().regex(/^(?:\d{6}|[a-zA-Z0-9_-]{16})$/);
+
 export const LoginSchema = z.strictObject({
   email: z.string().email('Invalid email address'),
-  password: z.string().min(8, 'Password must be at least 8 characters').max(4096)
+  password: z.string().min(8, 'Password must be at least 8 characters').max(4096),
+  secondFactor: SecondFactorSchema.optional()
 });
 
 export const RefreshTokenSchema = z.strictObject({

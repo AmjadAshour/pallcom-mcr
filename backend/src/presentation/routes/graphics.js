@@ -78,7 +78,7 @@ function readItems(db, stationId) {
   return db.prepare('SELECT * FROM station_graphics WHERE stationId = ?').all(stationId);
 }
 
-graphicsRouter.get(root, authenticate, authorize('station:control'), stationHandler((req, res, db) => {
+graphicsRouter.get(root, authenticate, authorize('graphics:manage'), stationHandler((req, res, db) => {
   const id = req.params.id;
   db.prepare('INSERT OR IGNORE INTO station_graphics_tokens (stationId, token, expiresAt) VALUES (?, ?, ?)')
     .run(id, randomBytes(32).toString('hex'), Date.now() + graphicsLinkLifetime);
@@ -91,7 +91,7 @@ graphicsRouter.get(root, authenticate, authorize('station:control'), stationHand
   });
 }));
 
-graphicsRouter.post(root + '/rotate-link', authenticate, authorize('station:control'), stationHandler((req, res, db) => {
+graphicsRouter.post(root + '/rotate-link', authenticate, authorize('graphics:manage'), stationHandler((req, res, db) => {
   const token = randomBytes(32).toString('hex');
   const expiresAt = Date.now() + graphicsLinkLifetime;
   db.prepare(`INSERT INTO station_graphics_tokens (stationId, token, expiresAt) VALUES (?, ?, ?)
@@ -100,14 +100,14 @@ graphicsRouter.post(root + '/rotate-link', authenticate, authorize('station:cont
   res.set('Cache-Control', 'no-store').json({ success: true, token, expiresAt });
 }));
 
-graphicsRouter.delete(root + '/link', authenticate, authorize('station:control'), stationHandler((req, res, db) => {
+graphicsRouter.delete(root + '/link', authenticate, authorize('graphics:manage'), stationHandler((req, res, db) => {
   db.prepare(`INSERT INTO station_graphics_tokens (stationId, token, expiresAt) VALUES (?, ?, 0)
     ON CONFLICT(stationId) DO UPDATE SET token = excluded.token, expiresAt = 0`)
     .run(req.params.id, randomBytes(32).toString('hex'));
   res.set('Cache-Control', 'no-store').sendStatus(204);
 }));
 
-graphicsRouter.put(root + '/:kind', authenticate, authorize('station:control'), validateBody(settingsSchema), validateImage, stationHandler((req, res, db) => {
+graphicsRouter.put(root + '/:kind', authenticate, authorize('graphics:manage'), validateBody(settingsSchema), validateImage, stationHandler((req, res, db) => {
   const { id, kind } = req.params;
   const { content, image } = req.body;
   if ((kind === 'logo' && !image) || (kind === 'ticker' && (!content || image)) ||
@@ -122,7 +122,7 @@ graphicsRouter.put(root + '/:kind', authenticate, authorize('station:control'), 
   res.json({ success: true });
 }));
 
-graphicsRouter.post(root + '/:kind/publish', authenticate, authorize('station:control'), validateBody(timerSchema), stationHandler((req, res, db) => {
+graphicsRouter.post(root + '/:kind/publish', authenticate, authorize('graphics:manage'), validateBody(timerSchema), stationHandler((req, res, db) => {
   const { id, kind } = req.params;
   const expiresAt = req.body.duration ? Date.now() + req.body.duration * 1000 : null;
   const result = db.prepare('UPDATE station_graphics SET published = 1, expiresAt = ? WHERE stationId = ? AND kind = ?')
@@ -131,13 +131,13 @@ graphicsRouter.post(root + '/:kind/publish', authenticate, authorize('station:co
   res.json({ success: true, expiresAt });
 }));
 
-graphicsRouter.post(root + '/:kind/hide', authenticate, authorize('station:control'), stationHandler((req, res, db) => {
+graphicsRouter.post(root + '/:kind/hide', authenticate, authorize('graphics:manage'), stationHandler((req, res, db) => {
   db.prepare('UPDATE station_graphics SET published = 0, expiresAt = NULL WHERE stationId = ? AND kind = ?')
     .run(req.params.id, req.params.kind);
   res.json({ success: true });
 }));
 
-graphicsRouter.delete(root + '/:kind', authenticate, authorize('station:control'), stationHandler((req, res, db) => {
+graphicsRouter.delete(root + '/:kind', authenticate, authorize('graphics:manage'), stationHandler((req, res, db) => {
   db.prepare('DELETE FROM station_graphics WHERE stationId = ? AND kind = ?').run(req.params.id, req.params.kind);
   res.json({ success: true });
 }));

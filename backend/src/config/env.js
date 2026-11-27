@@ -93,6 +93,20 @@ if (renderDisk) {
   }
 }
 
+const recoveryUrl = process.env.MCR_PASSWORD_RESET_DELIVERY_URL;
+const recoveryKey = process.env.MCR_PASSWORD_RESET_DELIVERY_KEY;
+if (recoveryUrl || recoveryKey) {
+  const delivery = URL.parse(recoveryUrl ?? '');
+  const publicOrigin = URL.parse(corsOrigin ?? '');
+  if (!delivery || delivery.protocol !== 'http:' || delivery.hostname !== '127.0.0.1' || !delivery.port ||
+      delivery.username || delivery.password || delivery.search || delivery.hash ||
+      !/^[a-f0-9]{64}$/i.test(recoveryKey ?? '') || !publicOrigin || publicOrigin.origin !== corsOrigin ||
+      (publicOrigin.protocol !== 'https:' && !(process.env.NODE_ENV !== 'production' &&
+        publicOrigin.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(publicOrigin.hostname)))) {
+    throw new Error('Password recovery requires an exact application origin and an authenticated loopback delivery service.');
+  }
+}
+
 export const env = Object.freeze({
   REQUIRE_PRIVATE_SECRETS: requiresPrivateSecrets,
   NODE_ENV: process.env.NODE_ENV || 'development',
@@ -113,5 +127,7 @@ export const env = Object.freeze({
   REFRESH_TOKEN_SECRET: process.env.REFRESH_TOKEN_SECRET || developmentSecrets.REFRESH_TOKEN_SECRET,
   REFRESH_TOKEN_EXPIRES_IN: process.env.REFRESH_TOKEN_EXPIRES_IN || '7d',
   ENCRYPTION_MASTER_KEY: process.env.ENCRYPTION_MASTER_KEY || developmentSecrets.ENCRYPTION_MASTER_KEY,
+  PASSWORD_RESET_DELIVERY_URL: recoveryUrl,
+  PASSWORD_RESET_DELIVERY_KEY: recoveryKey,
   LOG_LEVEL: process.env.LOG_LEVEL || 'info'
 });

@@ -91,7 +91,7 @@ export function authorizePlayback(req, res, next) {
   if (claims.stationId !== id || claims.programSession !== session) return res.sendStatus(404);
 
   const user = activeSessionUser(claims.sid, claims.sub);
-  if (!user || !hasPermission(user.role, 'station:control')) return res.sendStatus(401);
+  if (!user || !hasPermission(user.role, 'iptv:manage')) return res.sendStatus(401);
   req.user = user;
   next();
 }

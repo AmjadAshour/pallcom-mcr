@@ -16,19 +16,24 @@ export const ROLES = Object.freeze({
   VIEWER: 'VIEWER'
 });
 
+const broadcastOperatorPermissions = [
+  'broadcast:emergency', 'audio:manage', 'video:manage', 'media:upload', 'media:delete',
+  'advertising:manage', 'graphics:manage', 'iptv:manage', 'schedule:publish'
+];
+
 export const ROLE_PERMISSIONS = Object.freeze({
   [ROLES.SUPER_ADMIN]: ['*'],
   [ROLES.ORG_ADMIN]: [
     'org:manage', 'user:invite', 'user:manage', 'studio:manage',
     'station:read', 'station:manage', 'station:control', 'macro:manage', 'schedule:manage',
-    'audit:read', 'settings:manage'
+    'audit:read', 'settings:manage', ...broadcastOperatorPermissions
   ],
   [ROLES.STUDIO_MANAGER]: [
     'studio:manage', 'station:read', 'station:manage', 'station:control', 'macro:manage',
-    'schedule:manage', 'audit:read'
+    'schedule:manage', 'audit:read', ...broadcastOperatorPermissions
   ],
   [ROLES.OPERATOR]: [
-    'station:control', 'macro:execute', 'station:read', 'audit:read'
+    'station:control', 'macro:execute', 'station:read', 'audit:read', ...broadcastOperatorPermissions
   ],
   [ROLES.VIEWER]: [
     'station:read', 'multiview:read'

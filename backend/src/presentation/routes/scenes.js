@@ -181,7 +181,7 @@ scenesRouter.get(root + '/library', (req, res) => {
   res.json({ success: true, data: scenes });
 });
 
-scenesRouter.post(root + '/video', mediaUploadLimiter, async (req, res, next) => {
+scenesRouter.post(root + '/video', authorize('media:upload'), mediaUploadLimiter, async (req, res, next) => {
   const name = uploadName.safeParse(req.query.name);
   if (!name.success || !req.is('video/mp4')) {
     return res.status(400).json({ success: false, error: 'Choose a named MP4 video' });
@@ -207,7 +207,7 @@ scenesRouter.post(root + '/video', mediaUploadLimiter, async (req, res, next) =>
         error: 'Unreadable MP4 or video exceeds the ' + PROGRAM_SCENE_UPLOAD.maxSeconds + '-second limit' });
     }
     if (res.destroyed) return;
-    if (!hasCurrentPermission(req.user, 'station:control')) return res.sendStatus(403);
+    if (!hasCurrentPermission(req.user, 'media:upload')) return res.sendStatus(403);
     if (!ownsStation(req)) return res.sendStatus(404);
     db.exec('BEGIN IMMEDIATE');
     let asset;
@@ -236,7 +236,7 @@ scenesRouter.post(root + '/video/take', validateBody(z.object({ video: z.string(
   } catch (error) { next(error); }
 });
 
-scenesRouter.put(root, validateBody(schema), (req, res) => {
+scenesRouter.put(root, authorize('video:manage'), validateBody(schema), (req, res) => {
   const db = getSqliteDatabase();
   const id = req.params.id;
   if (req.body.type !== 'network') {

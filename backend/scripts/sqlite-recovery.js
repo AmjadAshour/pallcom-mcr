@@ -17,7 +17,7 @@ function openMcrDatabase(path, readOnly = true) {
   }
 }
 
-async function rotateStationPasswords(path, { currentKey, nextKey }) {
+async function rotateProtectedSecrets(path, { currentKey, nextKey }) {
   const { CryptoService } = await import('../src/infrastructure/security/crypto-service.js');
   const db = openMcrDatabase(path, false);
   try {
@@ -29,10 +29,18 @@ async function rotateStationPasswords(path, { currentKey, nextKey }) {
       const replacement = CryptoService.encryptSecret(password, nextKey);
       update.run(replacement, station.id);
     }
+    if (db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'auth_mfa'").get()) {
+      const factors = db.prepare('SELECT userId, encryptedSecret FROM auth_mfa').all();
+      const updateFactor = db.prepare('UPDATE auth_mfa SET encryptedSecret = ? WHERE userId = ?');
+      for (const factor of factors) {
+        const secret = CryptoService.decryptSecret(factor.encryptedSecret, currentKey);
+        updateFactor.run(CryptoService.encryptSecret(secret, nextKey), factor.userId);
+      }
+    }
     db.exec('COMMIT');
   } catch {
     // Closing the staging database rolls back any unfinished transaction.
-    throw Error('Unable to rotate station encryption on the copy. Verify the current key and source database.');
+    throw Error('Unable to rotate protected secrets on the copy. Verify the current key and source database.');
   } finally {
     db.close();
   }
@@ -61,7 +69,7 @@ export async function copyMcrDatabase(source, destination, rotation) {
     } finally {
       original.close();
     }
-    if (rotation) await rotateStationPasswords(staging, rotation);
+    if (rotation) await rotateProtectedSecrets(staging, rotation);
     const copy = openMcrDatabase(staging);
     try {
       const result = copy.prepare('PRAGMA integrity_check').all();

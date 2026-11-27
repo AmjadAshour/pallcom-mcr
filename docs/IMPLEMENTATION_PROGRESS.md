@@ -285,3 +285,7 @@ Phase One added isolated TLS staging with Chromium, secure HTTP and WSS sessions
 ## 2026-11-27 — Post-audit Phase One
 
 Baseline HEAD was `c3ab678307f2994f35dbb33f2e0a67efbbe237c3` with 89 pre-existing status entries. This checkpoint describes the working tree. Reproduce from an approved immutable snapshot before release. Current production targets and the proposed sequence are in the master requirements and development plan. [Tests](TEST_REPORT.md) · [Release gates](SECURITY_RELEASE_GATES.md)
+
+## Phase Two local authentication and accounts
+
+Implemented self-service profile, password and session controls, scoped account activation and role editing, optional TOTP with recovery codes, and password recovery through a private loopback delivery contract. Both builds and 43 tests passed with frozen dependencies, and Chromium verified the principal account forms. Delivery through an actual mail provider and deployed acceptance are pending. Previous Phase One operational gates remain open. [Test evidence](TEST_REPORT.md#phase-two-local-account-verification) · [Security and rollback](SECURITY.md#phase-two-accounts-and-authentication)

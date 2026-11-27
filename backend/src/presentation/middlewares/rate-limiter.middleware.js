@@ -13,6 +13,24 @@ function credentialLimiter(error) {
 
 export const authLimiter = credentialLimiter('Too many login attempts. Please try again in 15 minutes.');
 export const pairingClaimLimiter = credentialLimiter('Too many pairing attempts. Please try again in 15 minutes.');
+export const passwordRecoveryLimiter = credentialLimiter('Too many password recovery attempts. Please try again in 15 minutes.');
+export const passwordResetLimiter = credentialLimiter('Too many password reset attempts. Please try again in 15 minutes.');
+export const emailRecoveryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyGenerator: (req) => createHash('sha256').update(req.body.email.trim().toLowerCase()).digest('hex'),
+  message: { success: false, error: 'Too many password recovery attempts. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+export const accountChangeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => req.user.id,
+  message: { success: false, error: 'Too many account changes. Please try again in 15 minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
 export const apiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute

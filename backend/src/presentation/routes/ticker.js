@@ -16,7 +16,7 @@ const schema = z.object({
   speed: z.number().int().min(40).max(360), direction: z.enum(['left', 'right'])
 }).strict().refine(settings => !settings.enabled || Boolean(settings.text), { path: ['text'], message: 'Enter a headline' });
 
-tickerRouter.use(root, authenticate, authorize('station:control'), (req, res, next) => {
+tickerRouter.use(root, authenticate, authorize('graphics:manage'), (req, res, next) => {
   if (!configured(req.params.id) || !getSqliteDatabase().prepare('SELECT 1 FROM stations WHERE id=? AND organizationId=?')
     .get(req.params.id, req.user.organizationId)) return res.sendStatus(404);
   res.set('Cache-Control', 'no-store');

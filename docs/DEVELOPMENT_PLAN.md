@@ -50,10 +50,10 @@ Phase One remains open. The [Phase One evidence](PHASE_ONE_GATES.md) records the
 
 The isolated Windows staging fixture verified application TLS, an HTTP and WebSocket reverse proxy, Chromium CSP and secure sessions, and the real Agent against an authenticated OBS protocol simulator. Real OBS needs host or VM network isolation. MySQL application integration remains unavailable because the active repositories and session and Program services depend on SQLite. [Local staging procedure and limits](DEPLOYMENT.md#phase-one-local-staging)
 
-The remaining production blockers do not inherently prevent offline account development against a synthetic SQLite database and generated keys. They prevent Phase One sign-off and any exposure to real credentials or external users. The phase gate remains in effect. The owner must close Phase One or explicitly amend the approved order before approving Phase Two. Any Phase Two feature requiring an active MySQL repository needs a separate scope decision under the Phase 15 dependency plan.
+The owner explicitly approved starting Phase Two locally with synthetic SQLite data and generated keys while Phase One is open. This approval leaves staging, production credential rotation and deployment gated. Any Phase Two feature requiring active MySQL repositories still needs the separate Phase 15 scope decision.
 ## Proposed post-audit execution order
 
-Phase One is the active approved phase. Preserve the original phase IDs and evidence. Move the persistence foundation forward because account transactions, storage metadata, worker ownership and scheduling must share durable MySQL contracts. The original Phase 15 retains full parity, migration and cutover acceptance. No reordering or future implementation is active until approved.
+Phase Two is approved for local account work. Phase One operational gates remain open. The following sequence is the proposed production roadmap. Preserve the original phase IDs and evidence. The original Phase 15 retains full parity, migration and cutover acceptance. Other future implementation requires separate approval.
 
 | Order and original IDs | Depends on | Acceptance, security and verification |
 | --- | --- | --- |

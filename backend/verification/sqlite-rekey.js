@@ -22,6 +22,9 @@ const original = CryptoService.encryptSecret(password, currentKey);
 db.prepare('INSERT INTO stations (id,organizationId,name,slug,encryptedPassword,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?)')
   .run('test-station', 'test-org', 'Station', 'station', original, new Date().toISOString(), new Date().toISOString());
 db.prepare('INSERT INTO program_ads VALUES (?,?)').run('test-station', '{}');
+const factor = randomBytes(20).toString('hex');
+const originalFactor = CryptoService.encryptSecret(factor, currentKey);
+db.prepare('INSERT INTO auth_mfa VALUES (?, ?, 1, 0, -1)').run('test-user', originalFactor);
 db.close();
 
 function rekey(target, from = currentKey, to = nextKey) {
@@ -49,6 +52,11 @@ try {
   assert.equal(CryptoService.decryptSecret(rotatedPassword, nextKey), password);
   assert.throws(() => CryptoService.decryptSecret(rotatedPassword, currentKey));
   assert.equal(originalDb.prepare(passwordColumn).get('test-station').encryptedPassword, original);
+  const factorColumn = 'SELECT encryptedSecret FROM auth_mfa WHERE userId = ?';
+  const rotatedFactor = read.prepare(factorColumn).get('test-user').encryptedSecret;
+  assert.equal(CryptoService.decryptSecret(rotatedFactor, nextKey), factor);
+  assert.throws(() => CryptoService.decryptSecret(rotatedFactor, currentKey));
+  assert.equal(originalDb.prepare(factorColumn).get('test-user').encryptedSecret, originalFactor);
   assert.equal(read.prepare('SELECT plan FROM program_ads WHERE stationId = ?').get('test-station').plan, '{}');
 } finally {
   read.close();

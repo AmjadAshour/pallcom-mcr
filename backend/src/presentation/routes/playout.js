@@ -64,7 +64,7 @@ function badRequest(error) {
 playoutRouter.get(root, authenticate, authorize('station:read'), withStation((req, station) =>
   stationPlayout(station.id).snapshot()));
 
-playoutRouter.put(root, authenticate, authorize('station:control'), validateBody(planSchema), withStation((req, station) => {
+playoutRouter.put(root, authenticate, authorize('schedule:publish'), validateBody(planSchema), withStation((req, station) => {
   const engine = stationPlayout(station.id);
   const previous = engine.plan;
   const knownAssets = new Map([...previous.items, ...previous.filler, ...readPlayoutAssets(station.id)]
@@ -108,4 +108,9 @@ const controlSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('overlay'), overlay: z.enum(['logo', 'lowerThird', 'ticker']), enabled: z.boolean() })
 ]);
 playoutRouter.post(root + '/control', authenticate, authorize('station:control'), validateBody(controlSchema),
+  (req, res, next) => {
+    if (req.body.action === 'emergency') return authorize('broadcast:emergency')(req, res, next);
+    if (req.body.action === 'overlay') return authorize('graphics:manage')(req, res, next);
+    next();
+  },
   withStation((req, station) => stationPlayout(station.id).control(req.body.action, req.body)));

@@ -170,12 +170,31 @@ export function getSqliteDatabase() {
       id TEXT PRIMARY KEY, userId TEXT NOT NULL, refreshHash TEXT NOT NULL, expiresAt INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS auth_sessions_expiry ON auth_sessions(expiresAt);
+    CREATE INDEX IF NOT EXISTS auth_sessions_user ON auth_sessions(userId);
     CREATE TRIGGER IF NOT EXISTS revoke_auth_sessions_on_account_change
     AFTER UPDATE OF isActive, passwordHash ON users
     WHEN NEW.isActive = 0 OR NEW.passwordHash IS NOT OLD.passwordHash
     BEGIN
       DELETE FROM auth_sessions WHERE userId = NEW.id;
     END;
+
+    CREATE TABLE IF NOT EXISTS password_reset_grants (
+      userId TEXT PRIMARY KEY, tokenHash TEXT NOT NULL UNIQUE, expiresAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS password_reset_grants_expiry ON password_reset_grants(expiresAt);
+    CREATE TRIGGER IF NOT EXISTS revoke_password_reset_on_account_change
+    AFTER UPDATE OF isActive, passwordHash ON users
+    WHEN NEW.isActive = 0 OR NEW.passwordHash IS NOT OLD.passwordHash
+    BEGIN
+      DELETE FROM password_reset_grants WHERE userId = NEW.id;
+    END;
+    CREATE TABLE IF NOT EXISTS auth_mfa (
+      userId TEXT PRIMARY KEY, encryptedSecret TEXT NOT NULL, enabled INTEGER NOT NULL,
+      pendingUntil INTEGER NOT NULL, lastStep INTEGER NOT NULL DEFAULT -1
+    );
+    CREATE TABLE IF NOT EXISTS auth_mfa_recovery_codes (
+      userId TEXT NOT NULL, codeHash TEXT NOT NULL, PRIMARY KEY (userId, codeHash)
+    );
 
     CREATE TABLE IF NOT EXISTS audit_logs (
       id TEXT PRIMARY KEY,

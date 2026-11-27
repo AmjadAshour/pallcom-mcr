@@ -1,12 +1,13 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useMemo } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Header } from './Header.jsx';
 import { Sidebar } from './Sidebar.jsx';
 import { useMcrStore } from '../../context/useMcrStore.js';
 
-export function DashboardLayout({ user, logout, error }) { 
+export function DashboardLayout({ user, logout, error, updateUser, clearSession }) {
   const { language, pending, connectionError, commandError } = useMcrStore();
   const ar = language === 'ar';
+  const account = useMemo(() => ({ ...user, updateUser, clearSession }), [user, updateUser, clearSession]);
   return (
     <div className="flex flex-col h-screen w-screen bg-zinc-950 text-zinc-100 overflow-hidden">
       <Header />
@@ -17,7 +18,7 @@ export function DashboardLayout({ user, logout, error }) {
           {(error || connectionError || commandError) && <p role="alert" className="mb-3 text-red-300">{error || connectionError || commandError}</p>}
           {Object.values(pending).some(Boolean) && <p role="status" className="mb-3 text-cyan-300">{ar ? 'بانتظار تأكيد الجهاز…' : 'Waiting for device acknowledgement…'}</p>}
           <Suspense fallback={<p role="status">{ar ? 'جارٍ التحميل…' : 'Loading…'}</p>}>
-            <Outlet context={user} />
+            <Outlet context={account} />
           </Suspense>
         </main>
       </div>

@@ -22,7 +22,7 @@ function ownsStation(req) {
   return configured(req.params.id) && getSqliteDatabase().prepare('SELECT 1 FROM stations WHERE id=? AND organizationId=?')
     .get(req.params.id, req.user.organizationId);
 }
-watermarkRouter.use(root, authenticate, authorize('station:control'), (req, res, next) => {
+watermarkRouter.use(root, authenticate, authorize('graphics:manage'), (req, res, next) => {
   if (!ownsStation(req)) return res.sendStatus(404);
   res.set('Cache-Control', 'no-store');
   next();

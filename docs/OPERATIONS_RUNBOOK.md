@@ -20,6 +20,6 @@ The recovery CLI has a rekey mode for SQLite. Run it on a protected backup and s
 node backend/scripts/sqlite-recovery.js rekey <protected-backup.sqlite> <new-candidate.sqlite>
 ```
 
-The environment variable names are MCR_REKEY_CURRENT and MCR_REKEY_NEXT. The arguments are file paths only. The tool copies the source, updates encrypted station OBS passwords in a transaction on the copy, checks integrity and publishes to a new path. It refuses to publish over an existing path or after an incorrect key. It does not rotate signing keys or change account passwords.
+The environment variable names are MCR_REKEY_CURRENT and MCR_REKEY_NEXT. The arguments are file paths only. The tool copies the source, updates encrypted station OBS passwords and TOTP secrets in a transaction on the copy, checks integrity and publishes to a new path. It refuses to publish over an existing path or after an incorrect key. It does not rotate signing keys or change account passwords.
 
 Before any real cutover, use an authorized window, take a final backup after writes are quiesced, restrict permissions on both copies, and rehearse startup with the new encryption key on isolated staging. Verify pairing and an independent A/V receiver. Keep the original database and its matching key together for protected rollback. Rollback requires restoring both under an authorized window. Treat old copies as sensitive because credential rotation does not rewrite existing backups.
