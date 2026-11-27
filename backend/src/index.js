@@ -144,7 +144,8 @@ if (process.env.NODE_ENV !== 'test') {
   server.listen(env.PORT, process.env.MCR_BIND_HOST || '127.0.0.1', async () => {
     logger.info(`[${env.APP_NAME}] Backend running on port ${env.PORT} in ${env.NODE_ENV} mode [Storage: ${env.STORAGE_MODE}]`);
     await initDefaultData();
-    startAutomationWorker();
+    if (!server.listening) return;
+    server.once('close', startAutomationWorker());
     restorePlayout();
     if (!runtimePort && env.STORAGE_MODE === 'sqlite' && server.listening) {
       const scheduleTimer = startProgramSchedule();

@@ -373,5 +373,6 @@ try {
   await Promise.all(reservations.map(close));
   await close(web);
   database?.close();
+  if (database) await delay(1100);
   await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

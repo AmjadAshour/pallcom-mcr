@@ -41,6 +41,10 @@ export MCR_PROGRAM_SRT_URL='' MCR_PROGRAM_SRT_PASSPHRASE=''
 "${compose[@]}" config --quiet
 "${compose[@]}" up --build -d
 "${compose[@]}" exec -T web nginx -t
+if [[ -n "$("${compose[@]}" port server 4000 2>/dev/null || true)" ]]; then
+  echo 'The API container must stay behind the gateway'
+  exit 1
+fi
 
 request=(curl --silent --show-error --noproxy '*' --cacert "$fixture/fullchain.pem" --max-time 4)
 ready=false
@@ -69,4 +73,7 @@ media_image="$("${compose[@]}" images -q server)"
 [[ -n "$media_image" ]]
 docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
   --user 1000:1000 -e MCR_PROGRAM_PYTHON=/usr/bin/python3 "$media_image" \
-  sh -ec 'node --version; timeout -k 5s 120s node backend/verification/hls-loopback.js; timeout -k 5s 120s node backend/verification/program-audio-monitor-loopback.js'
+  sh -ec 'node --version
+    timeout -k 5s 120s node backend/verification/hls-loopback.js
+    timeout -k 5s 120s node backend/verification/program-audio-monitor-loopback.js
+    timeout -k 5s 45s node backend/verification/credential-cutover-loopback.js'
