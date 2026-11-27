@@ -17,7 +17,7 @@ const labels = {
     removeImage: 'إزالة الصورة', duration: 'مدة العرض بالثواني', durationHelp: 'صفر = يستمر حتى توقفه',
     save: 'حفظ التعديل', publish: 'إظهار على البث', hide: 'إيقاف العرض', delete: 'حذف',
     visible: 'معروض', hidden: 'مخفي', expired: 'انتهت المدة', second: 'ث', loading: 'جارٍ تحميل الجرافيكس…',
-    preview: 'معاينة العناصر المنشورة', previewEmpty: 'لا توجد عناصر منشورة',
+    preview: 'معاينة العناصر المنشورة',
     obs: 'ربط محطة البث مع OBS', copy: 'نسخ رابط المصدر', copied: 'تم النسخ',
     rotate: 'تجديد الرابط', rotateConfirm: 'سيتوقف الرابط القديم فورًا. تابع إذا كنت مستعدًا لتحديث المصدر في OBS.',
     how: 'في OBS، اضبط مصدر المتصفح مرة واحدة فوق الفيديو. الصق الرابط واضبط أبعاده على مقاس اللوحة الأساسية بالكامل (مثل 1920 × 1080). من «التحويل» اختر «إعادة ضبط التحويل» ثم «ملاءمة للشاشة». الإعلان يثبت على اليسار بعرض 20%، والشعار أعلى اليمين، والشريط أسفل البث. استخدم مصدر المتصفح نفسه في كل مشهد.',
@@ -31,7 +31,7 @@ const labels = {
     removeImage: 'Remove image', duration: 'Display time in seconds', durationHelp: 'Zero keeps it visible until stopped',
     save: 'Save changes', publish: 'Show on broadcast', hide: 'Stop showing', delete: 'Delete',
     visible: 'Visible', hidden: 'Hidden', expired: 'Expired', second: 's', loading: 'Loading graphics…',
-    preview: 'Published graphics preview', previewEmpty: 'No published graphics',
+    preview: 'Published graphics preview',
     obs: 'Connect this station to OBS', copy: 'Copy source URL', copied: 'Copied',
     rotate: 'Rotate URL', rotateConfirm: 'The old URL stops working immediately. Continue when you are ready to update OBS.',
     how: 'Set up one OBS Browser Source above the video. Paste this URL and set its dimensions to the full base canvas (for example, 1920 × 1080). Under Transform, choose Reset Transform, then Fit to Screen. The ad fills the left 20%, the logo sits at the top right, and the ticker stays at the bottom. Reuse this source in each scene.',
@@ -142,17 +142,17 @@ function GraphicsSlot({ kind, saved, t, onCommit, path }) {
           <button type="button" disabled={busy} className="text-xs underline" onClick={() => setImage('')}>{t.removeImage}</button>
         </div>}
       </div>}
-      <label className="block text-xs">{t.duration}
+      {(valid || saved) && <label className="block text-xs">{t.duration}
         <input className={fieldClass} type="number" min="0" max="86400" step="1" value={duration} onChange={(event) => setDuration(event.target.value)} disabled={busy} />
         <span className="mt-1 block text-zinc-400">{t.durationHelp}</span>
-      </label>
+      </label>}
       <div className="flex flex-wrap gap-2">
-        <button className={buttonClass} onClick={() => perform('save')} disabled={busy || !dirty || !valid}>{t.save}</button>
-        <button className={buttonClass + ' bg-cyan-800 text-white'} onClick={() => perform('publish')} disabled={busy || !saved || dirty || !validDuration}>{t.publish}</button>
-        <button className={buttonClass} onClick={() => perform('hide')} disabled={busy || !active}>{t.hide}</button>
-        <button className={buttonClass + ' border-red-800 text-red-300'} disabled={busy || !saved} onClick={() => {
+        {dirty && <button className={buttonClass} onClick={() => perform('save')} disabled={busy || !valid}>{t.save}</button>}
+        {saved && !dirty && <button className={buttonClass + ' bg-cyan-800 text-white'} onClick={() => perform('publish')} disabled={busy || !validDuration}>{t.publish}</button>}
+        {active && <button className={buttonClass} onClick={() => perform('hide')} disabled={busy}>{t.hide}</button>}
+        {saved && <button className={buttonClass + ' border-red-800 text-red-300'} disabled={busy} onClick={() => {
           if (window.confirm(t.confirm)) void perform('delete');
-        }}>{t.delete}</button>
+        }}>{t.delete}</button>}
       </div>
       {error && <p role="alert" className="text-xs text-red-300">{t.error} · {error}</p>}
     </article>
@@ -232,16 +232,15 @@ function StationGraphics({ stationId, t }) {
           ...current, items: [...current.items.filter((entry) => entry.kind !== kind), ...(item ? [item] : [])]
         }))} />)}
     </div>
-    <div className="grid gap-4 lg:grid-cols-2">
-      <section className="rounded-lg border border-zinc-800 p-4">
+    <div className={visibleItems.length ? 'grid items-start gap-4 lg:grid-cols-2' : undefined}>
+      {visibleItems.length > 0 && <section className="rounded-lg border border-zinc-800 p-4">
         <h2 className="mb-3 font-semibold">{t.preview}</h2>
         <div className="relative aspect-video overflow-hidden rounded border border-zinc-700 bg-gradient-to-br from-slate-800 to-zinc-950">
           <OverlayCanvas items={visibleItems} />
-          {!visibleItems.length && <p className="absolute inset-0 grid place-items-center text-sm text-zinc-400">{t.previewEmpty}</p>}
         </div>
-      </section>
-      <section className="space-y-3 rounded-lg border border-zinc-800 p-4">
-        <h2 className="font-semibold">{t.obs}</h2>
+      </section>}
+      <details className="space-y-3 rounded-lg border border-zinc-800 p-4">
+        <summary className="cursor-pointer font-semibold">{t.obs}</summary>
         <p className="text-sm text-zinc-400">{t.how}</p>
         <input aria-label={t.obs} className={fieldClass} readOnly value={url} dir="ltr" onFocus={(event) => event.target.select()} />
         <button className={buttonClass} onClick={async () => {
@@ -263,7 +262,7 @@ function StationGraphics({ stationId, t }) {
           }
         }}>{t.rotate}</button>
         {error && <p role="alert" className="text-red-300">{error}</p>}
-      </section>
+      </details>
     </div>
   </>;
 }
