@@ -134,7 +134,27 @@ test('account changes preserve scope, audit integrity and session revocation', {
     method: 'PATCH', token: admin, body: { currentPassword: password, role: 'OPERATOR' }
   });
   await send('/auth/me', 401, { token: result.accessToken });
-  assert.equal((await login('viewer', 200, newPassword)).user.role, 'OPERATOR');
+  const operator = await login('viewer', 200, newPassword);
+  assert.equal(operator.user.role, 'OPERATOR');
+  const provision = (email, actor, { role = 'VIEWER', organizationId = 'local' } = {}) => users.create({
+    email, role, organizationId, fullName: 'Provisioning fixture', passwordHash
+  }, { actor });
+  const administrator = { id: 'admin', sessionId: sid(admin), ipAddress: '127.0.0.1' };
+  const provisioned = await provision('provisioned@example.test', administrator);
+  await assert.rejects(provision(provisioned.email, administrator), { status: 409 });
+  await assert.rejects(provision('revoked@example.test', {
+    ...administrator, sessionId: 'missing-session'
+  }), { status: 403 });
+  await assert.rejects(provision('operator-attempt@example.test', {
+    id: 'viewer', sessionId: sid(operator.accessToken), ipAddress: '127.0.0.1'
+  }), { status: 403 });
+  await assert.rejects(provision('foreign-attempt@example.test', administrator, { organizationId: 'foreign' }), { status: 403 });
+  await assert.rejects(provision('root-attempt@example.test', administrator, { role: 'SUPER_ADMIN' }), { status: 403 });
+  assert.equal(await users.findByEmail('revoked@example.test'), null);
+  assert.equal(await users.findByEmail('operator-attempt@example.test'), null);
+  assert.equal(await users.findByEmail('foreign-attempt@example.test'), null);
+  assert.equal(await users.findByEmail('root-attempt@example.test'), null);
+  assert.equal(db.prepare("SELECT count(*) AS count FROM audit_logs WHERE action = 'USER_CREATED'").get().count, 1);
   assert.deepEqual(db.prepare(`
     SELECT action, userId FROM audit_logs WHERE resourceId = 'viewer'
       AND action IN ('PROFILE_UPDATED', 'ACCOUNT_DEACTIVATED', 'ACCOUNT_ACTIVATED', 'PASSWORD_CHANGED', 'ACCOUNT_ROLE_CHANGED')

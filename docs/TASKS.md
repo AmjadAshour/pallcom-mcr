@@ -76,12 +76,14 @@ The [evidence ledger](PHASE_ONE_GATES.md) holds individual controls, regression 
 | Password recovery and mail transport | Isolated HTTP delivery fixture verified generic responses, hashed expiry, concurrent single use and session revocation. Actual mail delivery requires an approved provider and deployed private transport | BLOCKED |
 | Optional MFA | Local integration passed authenticated setup and removal, replay rejection, hashed recovery codes, session invalidation and encrypted-copy rekey. An authenticator is provisioned via a manual setup key | VERIFIED_COMPLETE |
 | Granular permissions for current operations | Added independent endpoint permissions and verified unauthorized role denials without changing defined legacy role access. Later system settings and source/provider administration routes remain outside this implementation | VERIFIED_COMPLETE |
+| Browser account and recovery workflows | Disposable Chromium passed role editing, MFA restart and enrollment, local reset delivery, persistent MFA after reset and recovery code replay rejection | VERIFIED_COMPLETE |
+| Current authorization for account creation | SQLite tests passed valid creation and rejected stale sessions, operator attempts, foreign organizations, unassignable roles and duplicate addresses. The only new account had exactly one creation audit event | VERIFIED_COMPLETE |
 
 See [local account report](TEST_REPORT.md#phase-two-local-account-verification) and [security and rollback](SECURITY.md#phase-two-accounts-and-authentication). Staging and mail delivery remain outside the local approval.
 
 ## Phase One post-audit checkpoint
 
-Phase One remains active. The Phase Two and Phase 17–18 approvals remain gated. [Post-audit security release gates](SECURITY_RELEASE_GATES.md) distinguish local remediation from deployment acceptance. [Proposed dependency order](DEVELOPMENT_PLAN.md#proposed-post-audit-execution-order) introduces no new approved implementation phase. Keep G56 open for the unresolved Windows native exit and receiver repeatability.
+Phase One operational gates remain open while Phase Two proceeds under the owner's local-only approval. The Phase 17–18 design gates remain in place. [Post-audit security release gates](SECURITY_RELEASE_GATES.md) distinguish local remediation from deployment acceptance. Keep G56 open for the unresolved Windows native exit and receiver repeatability.
 
 The follow-up isolated checks passed for signed HLS station and session scope, SQLite restoration of graphics revocation state, and rekey of a disposable copy. See [the verification report](TEST_REPORT.md#follow-up-verification-for-stream-scope-and-recovery). [Restore procedures](UPDATE_AND_ROLLBACK_PLAN.md) require reconciliation of security changes after a snapshot before traffic is restored.
 

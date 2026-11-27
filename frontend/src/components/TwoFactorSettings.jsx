@@ -55,7 +55,7 @@ export function TwoFactorSettings({ ar, clearSession }) {
         {secret && <p>{ar ? 'أضف هذا المفتاح يدويًا في تطبيق المصادقة ثم أدخل الرمز.' : 'Enter this setup key in your authenticator, then enter its code.'}
           {' '}<code dir="ltr" className="break-all">{secret}</code>
         </p>}
-        <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
+        <form key={secret ? 'confirm' : 'manage'} onSubmit={submit} className="flex flex-wrap items-end gap-2">
           <label>{ar ? 'كلمة المرور الحالية' : 'Current password'}
             <Input name="currentPassword" type="password" required autoComplete="current-password" maxLength={4096} />
           </label>
@@ -64,6 +64,10 @@ export function TwoFactorSettings({ ar, clearSession }) {
           </label>}
           <Button disabled={busy}>{enabled ? (ar ? 'تعطيل التحقق بخطوتين' : 'Disable two-factor authentication')
             : secret ? (ar ? 'تأكيد الإعداد' : 'Verify setup') : (ar ? 'بدء الإعداد' : 'Set up two-factor authentication')}</Button>
+          {secret && <Button type="button" variant="outline" disabled={busy} onClick={() => {
+            setSecret('');
+            setError('');
+          }}>{ar ? 'إعادة بدء الإعداد' : 'Restart setup'}</Button>}
         </form>
       </>}
     </section>

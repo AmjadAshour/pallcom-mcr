@@ -1,6 +1,9 @@
 import { IUserRepository, User } from '@mcr/domain';
 import { getSqliteDatabase } from '../database/sqlite.js';
 import { insertAuditEvent } from './sqlite-audit-repository.js';
+import { managedAccountRoles } from '../security/account-management.js';
+import { activeSessionUser } from '../security/session-service.js';
+import { hasPermission } from '../../presentation/middlewares/rbac.middleware.js';
 import crypto from 'node:crypto';
 
 export class SqliteUserRepository extends IUserRepository {
@@ -29,6 +32,8 @@ export class SqliteUserRepository extends IUserRepository {
   async create(data, { actor } = {}) {
     const id = data.id || crypto.randomUUID();
     const now = new Date().toISOString();
+    const role = data.role || 'OPERATOR';
+    const email = data.email.toLowerCase().trim();
 
     const stmt = this.db.prepare(`
       INSERT INTO users (id, email, passwordHash, fullName, isActive, role, organizationId, createdAt, updatedAt)
@@ -37,11 +42,11 @@ export class SqliteUserRepository extends IUserRepository {
 
     const values = [
       id,
-      data.email.toLowerCase().trim(),
+      email,
       data.passwordHash,
       data.fullName,
       data.isActive !== undefined ? (data.isActive ? 1 : 0) : 1,
-      data.role || 'OPERATOR',
+      role,
       data.organizationId || null,
       now,
       now
@@ -50,6 +55,16 @@ export class SqliteUserRepository extends IUserRepository {
     if (actor) {
       this.db.exec('BEGIN IMMEDIATE');
       try {
+        const current = activeSessionUser(actor.sessionId, actor.id);
+        if (!current || current.organizationId !== data.organizationId || !hasPermission(current.role, 'user:manage')) {
+          throw Object.assign(new Error('Access denied.'), { status: 403 });
+        }
+        if (!managedAccountRoles.includes(role)) {
+          throw Object.assign(new Error('Role is not assignable.'), { status: 403 });
+        }
+        if (this.db.prepare('SELECT 1 FROM users WHERE email = ?').get(email)) {
+          throw Object.assign(new Error('Email is already registered'), { status: 409 });
+        }
         stmt.run(...values);
         insertAuditEvent(this.db, {
           organizationId: data.organizationId,
@@ -57,7 +72,7 @@ export class SqliteUserRepository extends IUserRepository {
           action: 'USER_CREATED',
           resourceType: 'User',
           resourceId: id,
-          details: { role: data.role },
+          details: { role },
           ipAddress: actor.ipAddress
         });
         this.db.exec('COMMIT');

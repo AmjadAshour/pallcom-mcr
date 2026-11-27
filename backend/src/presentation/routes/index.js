@@ -85,7 +85,7 @@ apiRouter.post('/users', authenticate, authorize('user:manage'), validateBody(z.
     if (await repository.findByEmail(values.email)) return res.status(409).json({ success: false, error: 'Email is already registered' });
     const passwordHash = await CryptoService.hashPassword(password);
     await repository.create({ ...values, passwordHash, organizationId: req.user.organizationId }, {
-      actor: { id: req.user.id, ipAddress: req.ip }
+      actor: { id: req.user.id, sessionId: req.user.sessionId, ipAddress: req.ip }
     });
     res.status(201).json({ success: true });
   } catch (error) {
