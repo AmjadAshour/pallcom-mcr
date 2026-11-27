@@ -59,11 +59,11 @@ An explicit owner approval is required to start each numbered phase. The depende
 | Local recovery and broadcast-path regressions | VERIFIED_COMPLETE | Recovery, split upload, HLS/UDP, encrypted SRT and audio monitor passed on final runs, G49 and G57–G58. |
 | Offline package inventory | VERIFIED_COMPLETE | Lockfile integrity metadata and installed tree inspection, G55. Advisory status requires a separate scan. |
 | Actual rotation and recovery sign-off | BLOCKED | Approve a maintenance window, credential scope and rollback owner, G8. |
-| Public TLS, Nginx/Render parity, egress, logs, ACLs and runtime privilege | BLOCKED | Supply an authorized representative staging deployment and permitted source/output fixtures, G4 and G51. |
+| Public TLS, Nginx/Render parity, egress, logs, ACLs and runtime privilege | BLOCKED | Restricted Compose identity and fresh private SQLite/HLS mounts passed in Linux CI (G64). Supply an authorized representative staging deployment to verify actual identities, existing data and backup ACLs, permitted source/output fixtures and effective infrastructure policy (G4 and G51). |
 | Real OBS based acceptance | VERIFIED_COMPLETE | Genuine OBS and Agent read-only integration in an isolated Linux container, G50. |
 | MySQL application verification | BLOCKED | MySQL runtime repositories and session/Program persistence are unwired and remain Phase 15 scope, G48. |
 | npm advisory scan and isolated target install | VERIFIED_COMPLETE | Offline OSV reported zero findings after upgrades. Linux Compose built project dependencies and Windows tested a clean installation and actual Electron, G18 and G55. |
-| Reproducible Windows HLS fixture stability | PARTIAL | Linux HLS passed with bounded cleanup. Four Windows missing-worker controls returned the expected exit status. A normal Windows run intermittently timed out at receiver decoding. The original native exit remains unresolved, G56. [Windows evidence](TEST_REPORT.md#windows-hls-repeatability-follow-up) |
+| Reproducible Windows HLS fixture stability | PARTIAL | Linux HLS passed with bounded cleanup. Four Windows missing-worker controls returned the expected exit status. The latest 12 serial Windows playback runs passed. The earlier decoding timeout and native exit remain unexplained, G56. [Windows evidence](TEST_REPORT.md#windows-hls-repeatability-follow-up) |
 
 The [evidence ledger](PHASE_ONE_GATES.md) holds individual controls, regression results and blockers. Offline Phase Two development is technically possible with synthetic SQLite and generated keys. Phase One acceptance and explicit owner approval remain the prerequisites for commencing it under the current plan.
 

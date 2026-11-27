@@ -304,3 +304,11 @@ The fixture now reports separate decoded audio and video byte counts and whether
 The Windows Node 24.15.0 workspace rerun passed all 39 tests (7 shared-package, 26 server, 3 web, 2 Agent and 1 desktop). `npm run build:web`, `npm run build:server`, `node --check backend/verification/hls-loopback.js` and `git diff --check` exited 0. The suite used temporary SQLite and did not contact a live station.
 
 [GitHub Actions run 46003078386](https://github.com/AmjadAshour/pallcom-mcr/actions/runs/46003078386) passed all four jobs on `3f60639`: Linux Compose and media loopback, isolated real OBS and Agent, offline advisory scan, and Windows desktop runtime.
+
+A separate serial repeatability run passed 12 of 12 normal-worker Windows loopbacks, eight on Node 22.23.5 and four on Node 24.15.0. Each used its own temporary SQLite database, synthetic media and FFmpeg 8.1.2. All processes exited 0 after independent HLS/UDP audio and video decoding, HLS failure isolation and fixture shutdown. Neither earlier Windows failure recurred. The original cause remains unverified.
+
+### Restricted Linux Compose verification
+
+[GitHub Actions run 46010676052](https://github.com/AmjadAshour/pallcom-mcr/actions/runs/46010676052) passed all four jobs on `348cdca`. The Linux Compose job built the server and gateway images, deployed the restricted overlay with a new named SQLite volume, and verified UID/GID 1000, zero effective capabilities and `NoNewPrivs=1`. The SQLite directory and HLS tmpfs were writable by that identity at mode 0700 and the server created its database. The API retained zero published host port bindings. Nginx configuration, loopback TLS, CSP, HSTS, API authentication and denial of legacy IPTV paths passed. HLS/UDP output isolation, audio monitor authorization, and disposable signing-key cutover also passed. Windows desktop, isolated real OBS and the offline advisory scan passed in their own jobs.
+
+The disposable run did not cover an existing volume, an operational station or staging egress and logs. Follow [deployment and rollback](DEPLOYMENT.md#restricted-linux-compose-runtime) before enabling the optional overlay on an installation with data.
