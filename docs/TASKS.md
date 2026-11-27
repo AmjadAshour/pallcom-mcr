@@ -13,5 +13,6 @@
 | P2-001A | P2-001 distribution slice | Optional Linux Compose HLS output from Independent Program | One public channel over HTTPS when explicitly enabled; no public UDP port | See IPTV01 and IPTV02, and the IPTV deployment guide | Stop HLS and return to base Compose with the existing SQLite volume | IMPLEMENTED, LINUX ACCEPTANCE PENDING |
 | P3-001 | P3, P1-003 | Evaluate AI assistance in phase 12 | Operator override, opt-in and offline evaluation first | Labeled reference footage, accuracy and override tests | Disable AI suggestions | TODO |
 | P0-004 | P0 release gate, applicable phases | Production readiness | Approved deployment and rollback, no unresolved critical defects | Capacity, backup/restore and 1/8/24/72-hour soak as available | Restore last tested version and protected database backup | TODO |
+| UI-001 | Operator interface maintenance | Trim sidebar links by session permission and simplify the OBS graphics forms | Preserve routes and server authorization | See UICLEAN01–UICLEAN03 | Revert the frontend and accompanying records for UI-001 | IMPLEMENTED |
 
 External acceptance environments are blocked until supplied: compatible PTZ/capture hardware, provisioned WebRTC/TURN, licensed CAS/watermark integrations and a representative staging output. Feature-specific evidence is in the matrix.

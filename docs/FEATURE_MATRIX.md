@@ -10,7 +10,7 @@ Target capabilities follow the [public MCR Box feature inventory](https://mcrbox
 | 4 | Remote commentary | MISSING | No remote commentary worker found | WebRTC channels, mix-minus and audio return tests |
 | 5 | File playout | PARTIAL | Scheduler, OBS deck adapter, direct MP4 upload to scenes and a Video input with preview and direct Take | Long-form playout, real OBS interoperability, in/out, seek, timing and DST |
 | 6 | Live switching | PARTIAL | LiveControlPage and OBS v5 scene commands | Actual Program output, keying and frame timing |
-| 7 | Graphics | PARTIAL | Graphics page with Independent Program ads, watermark and encoded news ticker, plus OBS graphics and text sources | Templates, scoreboards and isolated third-party graphics |
+| 7 | Graphics | PARTIAL | Graphics page with Independent Program ads, watermark and encoded news ticker, plus OBS graphics and text sources. OBS forms show actions as they become available, and OBS setup opens on demand. | Templates, scoreboards and isolated third-party graphics |
 | 8 | Replay | PARTIAL | OBS replay buffer start/stop/save controls and OBS save-event timestamp | OBS staging verification, clip playback, marks, variable speed and export |
 | 9 | Audio mixing | PARTIAL | AudioMixerPage and OBS input controls | Delay, EQ, compression, routing and track verification |
 | 10 | Loudness | MISSING | OBS channel levels are available | LUFS, true peak and independent reference measurements |

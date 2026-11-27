@@ -1,5 +1,7 @@
 # Implementation progress
 
+2026-11-26. UI-001 simplifies the OBS graphics editor and filters sidebar links by session permissions. Removed the static operator identity. The frontend build and both frontend tests passed, and the conditional UI states were reviewed in source. Rollback consists of reverting the four frontend edits and the UI-001 documentation records. The change requires no data migration.
+
 2026-11-24. Phase 00 baseline and the initial phases 01–02 control-plane slice. All 20 pre-change tests passed against a temporary SQLite path. Existing README and Windows Agent worktree edits were noted before work. The development slice changes only the server Agent gateway, station status, tests and planning documents. No deployment was performed.
 
 The post-change suite passed 21 tests on Node.js 22. GATES:G1 passed simulated heartbeat loss, telemetry expiry/recovery, validation, and command backlog handling. GATES:G2 passed the authenticated Agent tunnel, cross-tenant checks, OBS acknowledgement simulation, and playout regressions. GATES:G3 records the manual documentation comparison.
