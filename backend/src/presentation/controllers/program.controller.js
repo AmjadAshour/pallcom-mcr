@@ -73,6 +73,15 @@ export async function createPlaybackLink(req, res, next) {
     if (!programHlsDirectory(id, status.session, 'index.m3u8')) return res.sendStatus(409);
 
     const ticket = CryptoService.signPlaybackToken({ stationId: id, programSession: status.session, userId, sessionId });
+    await RepositoryFactory.getAuditRepository().create({
+      organizationId,
+      userId,
+      action: 'PROGRAM_PLAYBACK_LINK_ISSUED',
+      resourceType: 'Station',
+      resourceId: id,
+      details: { programSession: status.session },
+      ipAddress: req.ip
+    });
     const path = '/api/v1/stations/' + encodeURIComponent(id) + '/program/hls/' +
       encodeURIComponent(status.session) + '/play/' + ticket + '/index.m3u8';
     res.json({ success: true, data: { path } });

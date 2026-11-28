@@ -16,6 +16,12 @@ import { tickerRouter } from './presentation/routes/ticker.js';
 import { adsRouter } from './presentation/routes/ads.js';
 import { scenesRouter } from './presentation/routes/scenes.js';
 import { playoutRouter } from './presentation/routes/playout.js';
+import { mediaRouter } from './presentation/routes/media.js';
+import { videoSourcesRouter } from './presentation/routes/video-sources.js';
+import { audioRouter } from './presentation/routes/audio.js';
+import { channelPlayoutRouter } from './presentation/routes/channel-playout.js';
+import { channelSchedulerRouter } from './presentation/routes/channel-scheduler.js';
+import { mediaProcessingQueue } from './infrastructure/media/media-processor.js';
 import { attachPlayout, restorePlayout } from './infrastructure/playout/engine.js';
 import { requireMutationOrigin } from './presentation/middlewares/mutation-origin.middleware.js';
 import { errorHandler } from './presentation/middlewares/error.middleware.js';
@@ -93,6 +99,11 @@ app.use('/api/v1', tickerRouter);
 app.use('/api/v1', adsRouter);
 app.use('/api/v1', scenesRouter);
 app.use('/api/v1', playoutRouter);
+app.use('/api/v1', mediaRouter);
+app.use('/api/v1', videoSourcesRouter);
+app.use('/api/v1', audioRouter);
+app.use('/api/v1', channelPlayoutRouter);
+app.use('/api/v1', channelSchedulerRouter);
 const webRoot = fileURLToPath(new URL('../../frontend/dist/', import.meta.url));
 app.use(express.static(webRoot));
 app.get(/^\/(?!api(?:\/|$)|socket\.io(?:\/|$)).*/, (req, res, next) => {
@@ -147,6 +158,7 @@ if (process.env.NODE_ENV !== 'test') {
     if (!server.listening) return;
     server.once('close', startAutomationWorker());
     restorePlayout();
+    void mediaProcessingQueue.recoverInterruptedJobs();
     if (!runtimePort && env.STORAGE_MODE === 'sqlite' && server.listening) {
       const scheduleTimer = startProgramSchedule();
       server.once('close', () => clearInterval(scheduleTimer));

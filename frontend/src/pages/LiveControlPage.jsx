@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import { ProgramPreview } from '../components/ProgramPreview.jsx';
 import { IndependentProgram } from '../components/IndependentProgram.jsx';
+import { ChannelPlayoutConsole } from '../components/ChannelPlayoutConsole.jsx';
 import { useMcrStore } from '../context/useMcrStore.js';
 import { translations } from '../i18n/translations.js';
 import { Button, TallyIndicator, TBarSlider } from '@mcr/ui';
@@ -34,6 +35,7 @@ export function LiveControlPage() {
   </p>;
   const canControl = user.permissions.includes('*') || user.permissions.includes('station:control');
   const canManage = user.permissions.includes('*') || user.permissions.includes('station:manage');
+  const canEmergency = user.permissions.includes('*') || user.permissions.includes('broadcast:emergency');
   const disabled = !currentStation.ready || Boolean(pending[currentStation.id]) ||
     !canControl;
   const studioUnavailable = disabled || !currentStation.studioModeEnabled;
@@ -92,6 +94,16 @@ export function LiveControlPage() {
           </Button>
         </div>}
       </div>
+
+      {/* Phase Six Server-Side Multi-Channel Playout Console */}
+      <ChannelPlayoutConsole
+        key={`playout-${currentStation.id}`}
+        stationId={currentStation.id}
+        language={language}
+        canControl={canControl}
+        canManage={canManage}
+        canEmergency={canEmergency}
+      />
 
       {/* Broadcast Dual Deck: Preview & Program */}
       <IndependentProgram key={currentStation.id} stationId={currentStation.id} language={language}

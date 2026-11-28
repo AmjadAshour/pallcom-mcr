@@ -1,9 +1,15 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const normalize = (p) => p.replace(/\\/g, '/');
+
 /** @type {import('tailwindcss').Config} */
 export default {
   content: [
-    "./index.html",
-    "./src/**/*.{js,jsx}",
-    "./ui/src/**/*.{js,jsx}"
+    normalize(path.join(__dirname, 'index.html')),
+    normalize(path.join(__dirname, 'src/**/*.{js,jsx}')),
+    normalize(path.join(__dirname, 'ui/src/**/*.{js,jsx}'))
   ],
   darkMode: 'class',
   theme: {
@@ -24,4 +30,4 @@ export default {
     },
   },
   plugins: [],
-}
+};

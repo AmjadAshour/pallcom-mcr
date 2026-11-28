@@ -5,6 +5,7 @@ import { stationPath } from '../context/api.js';
 import { useProgramStatus } from '../context/useProgramStatus.js';
 import { useMonitorFrame } from '../context/useProgramMonitor.js';
 import { LocalProgramScene } from '../components/LocalProgramScene.jsx';
+import { VideoSourcesCatalog } from '../components/VideoSourcesCatalog.jsx';
 import { translations } from '../i18n/translations.js';
 import { Card, CardHeader, CardTitle, CardContent } from '@mcr/ui';
 import { Layers, Eye, EyeOff, Video } from 'lucide-react';
@@ -26,6 +27,7 @@ export function SourcesScenesPage() {
   const t = translations[language] || translations.en;
   const { permissions } = useOutletContext();
   const canControl = permissions.includes('*') || permissions.includes('station:control');
+  const canManageVideo = permissions.includes('*') || permissions.includes('video:manage');
 
   const currentStation = stations.find((s) => s.id === selectedStationId) || stations[0];
   const [activeSceneName, setActiveSceneName] = useState(
@@ -67,6 +69,7 @@ export function SourcesScenesPage() {
       </div>
 
       {canControl && <IndependentScenes key={currentStation.id} stationId={currentStation.id} language={language} canSchedule={permissions.includes('*') || permissions.includes('schedule:manage')} />}
+      <VideoSourcesCatalog language={language} stations={stations} canManageVideo={canManageVideo} />
       {/* Two Column Layout: Scenes List & Sources Inspector */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
         {/* Scenes List Column */}

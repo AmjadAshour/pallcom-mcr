@@ -133,7 +133,8 @@ try {
     const parent = scope ? document.querySelector(scope) : document;
     const names = Object.keys(values);
     const form = [...(parent?.querySelectorAll('form') ?? [])]
-      .find(candidate => names.every(name => candidate.elements.namedItem(name)));
+      .find(candidate => names.every(name => candidate.elements.namedItem(name)) &&
+        (!candidate.elements.namedItem('fullName') || names.includes('fullName')));
     if (!form || form.querySelector('button:not([type]),button[type="submit"]')?.disabled) return false;
     for (const name of names) form.elements.namedItem(name).value = values[name];
     form.requestSubmit();
@@ -144,7 +145,19 @@ try {
   await navigate(origin + '/users');
   await submit({ email: admin.email, password });
   await hasText(operator.email);
-  await press('Change role');
+  await submit({
+    fullName: 'Browser created viewer',
+    email: 'browser-created@example.test',
+    password,
+    role: 'VIEWER',
+    currentPassword: password
+  });
+  await hasText('browser-created@example.test · VIEWER · Active');
+  await evaluate(targetEmail => {
+    const item = [...document.querySelectorAll('li')].find(candidate => candidate.textContent.includes(targetEmail));
+    const button = [...(item?.querySelectorAll('button') ?? [])].find(candidate => candidate.textContent.trim() === 'Change role');
+    button?.click();
+  }, operator.email);
   await submit({ role: 'OPERATOR', currentPassword: password });
   await hasText(operator.email + ' · OPERATOR');
   await press('Sign out');

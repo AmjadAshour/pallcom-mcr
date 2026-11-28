@@ -134,6 +134,14 @@ export function updateWatermark(packet) {
 export function updateTicker(ticker) {
   if (child && status.state !== 'stopping') child.stdin.write(JSON.stringify({ ticker }) + '\n');
 }
+export function pushExternalAudioFrame(stationId, pcmBuffer, mode = 'replace') {
+  if (!configured(stationId) || !child || status.state !== 'running' || child.stdin.destroyed || child.stdin.writableNeedDrain) {
+    return false;
+  }
+  const encoded = pcmBuffer ? Buffer.from(pcmBuffer).toString('base64') : '';
+  child.stdin.write(JSON.stringify({ externalAudioFrame: encoded, mode }) + '\n');
+  return true;
+}
 let status = { state: 'stopped' };
 
 export function selectedProgramStation() {

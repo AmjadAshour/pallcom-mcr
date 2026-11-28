@@ -20,4 +20,13 @@ test('Desktop Security Audit: Preload script enforces contextIsolation and restr
   // Ensure raw ipcRenderer or require is NOT directly exposed
   assert.equal(/contextBridge\.exposeInMainWorld\([^,]+,\s*ipcRenderer\)/.test(content), false);
   assert.equal(/nodeIntegration:\s*true/.test(content), false);
+
+  const mainPath = path.resolve(__dirname, '../src/main/index.js');
+  const mainContent = fs.readFileSync(mainPath, 'utf-8');
+  assert.match(mainContent, /contextIsolation:\s*true/);
+  assert.match(mainContent, /nodeIntegration:\s*false/);
+  assert.match(mainContent, /sandbox:\s*true/);
+  assert.match(mainContent, /setWindowOpenHandler/);
+  assert.match(mainContent, /will-navigate/);
+  assert.match(mainContent, /event\.senderFrame\.url/);
 });

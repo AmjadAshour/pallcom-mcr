@@ -16,23 +16,23 @@ const item = z.discriminatedUnion('kind', [
     kind: z.literal('media'), id: z.string().uuid(), title: name, category: z.enum(categories.slice(0, -1)),
     durationMs: z.number().int().min(1).max(86400000), assetId: z.string().regex(/^[a-f0-9]{16}:[\w-]{1,1600}$/),
     hardStartAt: z.number().int().min(0).max(4102444800000).nullable()
-  }),
+  }).strict(),
   z.object({
     kind: z.literal('live'), id: z.string().uuid(), title: name, category: z.literal('live'),
     sceneName: name, durationMs: z.number().int().min(1000).max(86400000),
     hardStartAt: z.number().int().min(0).max(4102444800000).nullable()
-  })
+  }).strict()
 ]);
 const optionalSource = z.string().trim().max(250);
 const planSchema = z.object({
   revision: z.number().int().nonnegative(), items: z.array(item).max(150), filler: z.array(item).max(50),
-  loop: z.boolean(), decks: z.array(z.object({ sceneName: name, inputName: name })).max(2),
+  loop: z.boolean(), decks: z.array(z.object({ sceneName: name, inputName: name }).strict()).max(2),
   backupScene: optionalSource,
   graphics: z.object({
     logoSource: optionalSource, lowerThirdSource: optionalSource, tickerSource: optionalSource,
     logo: z.boolean(), lowerThird: z.boolean(), ticker: z.boolean(), hideLogoDuringAds: z.boolean()
-  })
-}).superRefine((plan, context) => {
+  }).strict()
+}).strict().superRefine((plan, context) => {
   const addError = (message) => context.addIssue({ code: z.ZodIssueCode.custom, message });
   const all = [...plan.items, ...plan.filler];
   if (new Set(all.map((entry) => entry.id)).size !== all.length) addError('Playlist item IDs must be distinct');
@@ -64,7 +64,7 @@ function badRequest(error) {
 playoutRouter.get(root, authenticate, authorize('station:read'), withStation((req, station) =>
   stationPlayout(station.id).snapshot()));
 
-playoutRouter.put(root, authenticate, authorize('schedule:publish'), validateBody(planSchema), withStation((req, station) => {
+playoutRouter.put(root, authenticate, authorize('schedule:publish'), validateBody(planSchema), withStation(async (req, station) => {
   const engine = stationPlayout(station.id);
   const previous = engine.plan;
   const knownAssets = new Map([...previous.items, ...previous.filler, ...readPlayoutAssets(station.id)]
@@ -79,7 +79,17 @@ playoutRouter.put(root, authenticate, authorize('schedule:publish'), validateBod
     if (!durationMs) throw badRequest('Scan this asset before adding it to the playlist');
     return { ...entry, durationMs };
   }
-  return engine.savePlan({ ...req.body, items: req.body.items.map(normalize), filler: req.body.filler.map(normalize) });
+  const snapshot = await engine.savePlan({ ...req.body, items: req.body.items.map(normalize), filler: req.body.filler.map(normalize) });
+  await RepositoryFactory.getAuditRepository().create({
+    organizationId: req.user.organizationId,
+    userId: req.user.id,
+    action: 'PLAYOUT_PLAN_SAVED',
+    resourceType: 'Station',
+    resourceId: station.id,
+    details: { revision: snapshot.plan.revision },
+    ipAddress: req.ip
+  });
+  return snapshot;
 }));
 
 playoutRouter.get(root + '/assets', authenticate, authorize('station:read'), withStation((req, station) =>
@@ -90,22 +100,31 @@ playoutRouter.post(root + '/scan', authenticate, authorize('station:control'), w
     throw Object.assign(new Error('Station no longer exists'), { statusCode: 404 });
   }
   savePlayoutAssets(station.id, result.assets);
+  await RepositoryFactory.getAuditRepository().create({
+    organizationId: req.user.organizationId,
+    userId: req.user.id,
+    action: 'PLAYOUT_MEDIA_SCANNED',
+    resourceType: 'Station',
+    resourceId: station.id,
+    details: { count: result.assets.length, truncated: Boolean(result.truncated) },
+    ipAddress: req.ip
+  });
   return result;
 }));
 playoutRouter.post(root + '/health', authenticate, authorize('station:control'), validateBody(z.object({
   assetIds: z.array(z.string().regex(/^[a-f0-9]{16}:[\w-]{1,1600}$/)).max(200)
-})), withStation((req, station) => agentGateway.sendCommand(station.id, 'CheckPlayoutMedia', req.body, 200000)));
+}).strict()), withStation((req, station) => agentGateway.sendCommand(station.id, 'CheckPlayoutMedia', req.body, 200000)));
 
 playoutRouter.get(root + '/as-run', authenticate, authorize('station:read'), withStation((req, station) =>
   readAsRun(station.id)));
 
 const controlSchema = z.discriminatedUnion('action', [
-  z.object({ action: z.literal('start') }),
-  z.object({ action: z.literal('release') }),
-  z.object({ action: z.literal('skip') }),
-  z.object({ action: z.literal('restart') }),
-  z.object({ action: z.literal('emergency'), sceneName: name.optional() }),
-  z.object({ action: z.literal('overlay'), overlay: z.enum(['logo', 'lowerThird', 'ticker']), enabled: z.boolean() })
+  z.object({ action: z.literal('start') }).strict(),
+  z.object({ action: z.literal('release') }).strict(),
+  z.object({ action: z.literal('skip') }).strict(),
+  z.object({ action: z.literal('restart') }).strict(),
+  z.object({ action: z.literal('emergency'), sceneName: name.optional() }).strict(),
+  z.object({ action: z.literal('overlay'), overlay: z.enum(['logo', 'lowerThird', 'ticker']), enabled: z.boolean() }).strict()
 ]);
 playoutRouter.post(root + '/control', authenticate, authorize('station:control'), validateBody(controlSchema),
   (req, res, next) => {
@@ -113,4 +132,19 @@ playoutRouter.post(root + '/control', authenticate, authorize('station:control')
     if (req.body.action === 'overlay') return authorize('graphics:manage')(req, res, next);
     next();
   },
-  withStation((req, station) => stationPlayout(station.id).control(req.body.action, req.body)));
+  withStation(async (req, station) => {
+    const snapshot = await stationPlayout(station.id).control(req.body.action, req.body);
+    await RepositoryFactory.getAuditRepository().create({
+      organizationId: req.user.organizationId,
+      userId: req.user.id,
+      action: 'PLAYOUT_CONTROL',
+      resourceType: 'Station',
+      resourceId: station.id,
+      details: {
+        action: req.body.action,
+        ...(req.body.overlay && { overlay: req.body.overlay, enabled: req.body.enabled })
+      },
+      ipAddress: req.ip
+    });
+    return snapshot;
+  }));

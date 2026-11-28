@@ -101,17 +101,7 @@ export class StationController {
         ipAddress,
         obsPort,
         encryptedPassword
-      });
-
-      await auditRepo.create({
-        organizationId: req.user.organizationId,
-        userId: req.user.id,
-        action: 'STATION_CREATED',
-        resourceType: 'Station',
-        resourceId: newStation.id,
-        details: { name: newStation.name, ipAddress: newStation.ipAddress },
-        ipAddress: req.ip
-      });
+      }, { userId: req.user.id, ipAddress: req.ip });
 
       return res.status(201).json({
         success: true,
@@ -144,20 +134,13 @@ export class StationController {
         updateData.encryptedPassword = CryptoService.encryptSecret(obsPassword);
       }
 
-      const updated = await stationRepo.update(id, req.user.organizationId, updateData);
+      const updated = await stationRepo.update(id, req.user.organizationId, updateData, {
+        userId: req.user.id,
+        ipAddress: req.ip
+      });
       if (!updated) {
         return res.status(404).json({ success: false, error: 'Station not found' });
       }
-
-      await auditRepo.create({
-        organizationId: req.user.organizationId,
-        userId: req.user.id,
-        action: 'STATION_UPDATED',
-        resourceType: 'Station',
-        resourceId: id,
-        details: { updatedFields: Object.keys(updateData) },
-        ipAddress: req.ip
-      });
 
       return res.json({ success: true, data: { id: updated.id, name: updated.name } });
     } catch (err) {
@@ -176,22 +159,17 @@ export class StationController {
         return res.status(409).json({ success:false, error:'Unconfigure this station from the separate Program runtime before deleting it' });
       }
 
-      const deleted = await stationRepo.delete(id, req.user.organizationId);
+      const wasConfigured = configured(id);
+      const deleted = await stationRepo.delete(id, req.user.organizationId, {
+        userId: req.user.id,
+        ipAddress: req.ip
+      });
       if (!deleted) {
         return res.status(404).json({ success: false, error: 'Station not found' });
       }
       agentGateway.disconnectDeletedStation(id);
       removeStationPlayout(id);
-        if (configured(id)) stopProgram();
-
-      await auditRepo.create({
-        organizationId: req.user.organizationId,
-        userId: req.user.id,
-        action: 'STATION_DELETED',
-        resourceType: 'Station',
-        resourceId: id,
-        ipAddress: req.ip
-      });
+      if (wasConfigured) stopProgram();
 
       return res.json({ success: true, message: 'Station deleted successfully' });
     } catch (err) {

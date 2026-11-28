@@ -5,6 +5,9 @@ import path from 'node:path';
 export default defineConfig({
   // Frontend configuration uses same-origin routes.
   envPrefix: [],
+  build: {
+    sourcemap: false
+  },
   plugins: [react()],
   resolve: {
     alias: {

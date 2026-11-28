@@ -78,12 +78,24 @@ scenesRouter.put(root + '/schedule-hold', authorize('schedule:manage'),
     const db = getSqliteDatabase();
     const stationId = req.params.id;
     const { held } = req.body;
-    if (held) {
-      db.prepare('INSERT INTO program_schedule_hold VALUES (?,NULL) ON CONFLICT(stationId) DO UPDATE SET resumedAt=NULL')
-        .run(stationId);
-    } else {
-      db.prepare('UPDATE program_schedule_hold SET resumedAt=? WHERE stationId=? AND resumedAt IS NULL')
-        .run(Date.now(),stationId);
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (held) {
+        db.prepare('INSERT INTO program_schedule_hold VALUES (?,NULL) ON CONFLICT(stationId) DO UPDATE SET resumedAt=NULL')
+          .run(stationId);
+      } else {
+        db.prepare('UPDATE program_schedule_hold SET resumedAt=? WHERE stationId=? AND resumedAt IS NULL')
+          .run(Date.now(),stationId);
+      }
+      insertAuditEvent(db, {
+        organizationId: req.user.organizationId, userId: req.user.id,
+        action: 'PROGRAM_SCHEDULE_HOLD', resourceType: 'Station', resourceId: stationId,
+        details: { held }, ipAddress: req.ip
+      });
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
     }
     res.json({success:true,data:{held}});
   });
@@ -97,9 +109,25 @@ scenesRouter.post(root + '/schedule', authorize('schedule:manage'), validateBody
   if (dueAt <= Date.now()) return res.status(400).json({success:false,error:'Choose a future time'});
   const saved = readScene(db,stationId,sceneId);
   if (!saved) return res.sendStatus(404);
-  const id = createProgramSchedule(db, {stationId,userId:req.user.id,sceneId,scene:saved.scene,dueAt,
-    repeatDaily:req.body.repeatDaily});
-  if (!id) return res.status(409).json({success:false,error:'Another event is scheduled at that time'});
+  db.exec('BEGIN IMMEDIATE');
+  let id;
+  try {
+    id = createProgramSchedule(db, {stationId,userId:req.user.id,sceneId,scene:saved.scene,dueAt,
+      repeatDaily:req.body.repeatDaily});
+    if (!id) {
+      db.exec('ROLLBACK');
+      return res.status(409).json({success:false,error:'Another event is scheduled at that time'});
+    }
+    insertAuditEvent(db, {
+      organizationId: req.user.organizationId, userId: req.user.id,
+      action: 'PROGRAM_SCHEDULE_CREATED', resourceType: 'Station', resourceId: stationId,
+      details: { jobId: id, sceneId, dueAt, repeatDaily: Boolean(req.body.repeatDaily) }, ipAddress: req.ip
+    });
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
   res.status(201).json({success:true,data:{id}});
 });
 
@@ -109,17 +137,55 @@ scenesRouter.patch(root + '/schedule/:jobId', authorize('schedule:manage'), vali
   const {dueAt,previousDueAt} = req.body;
   const now = Date.now();
   if (dueAt <= now) return res.status(400).json({success:false,error:'Choose a future time'});
-  const result = getSqliteDatabase().prepare(`UPDATE OR IGNORE program_schedule SET dueAt=?
-    WHERE stationId=? AND id=? AND state='pending' AND dueAt=? AND dueAt>?`)
-    .run(dueAt,req.params.id,req.params.jobId,previousDueAt,now);
-  if (!result.changes) return res.status(409).json({success:false,error:'The event changed, is already due, or the new time is occupied'});
+  const db = getSqliteDatabase();
+  db.exec('BEGIN IMMEDIATE');
+  let changed = false;
+  try {
+    const result = db.prepare(`UPDATE OR IGNORE program_schedule SET dueAt=?
+      WHERE stationId=? AND id=? AND state='pending' AND dueAt=? AND dueAt>?`)
+      .run(dueAt,req.params.id,req.params.jobId,previousDueAt,now);
+    if (result.changes) {
+      changed = true;
+      insertAuditEvent(db, {
+        organizationId: req.user.organizationId, userId: req.user.id,
+        action: 'PROGRAM_SCHEDULE_RESCHEDULED', resourceType: 'Station', resourceId: req.params.id,
+        details: { jobId: req.params.jobId, dueAt, previousDueAt }, ipAddress: req.ip
+      });
+      db.exec('COMMIT');
+    } else {
+      db.exec('ROLLBACK');
+    }
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  if (!changed) return res.status(409).json({success:false,error:'The event changed, is already due, or the new time is occupied'});
   res.json({success:true});
 });
 
 scenesRouter.delete(root + '/schedule/:jobId', authorize('schedule:manage'), (req,res) => {
-  const removed = getSqliteDatabase().prepare("DELETE FROM program_schedule WHERE stationId=? AND id=? AND state='pending'")
-    .run(req.params.id,req.params.jobId);
-  if (!removed.changes) return res.status(409).json({success:false,error:'The event is no longer pending'});
+  const db = getSqliteDatabase();
+  db.exec('BEGIN IMMEDIATE');
+  let removed = false;
+  try {
+    const result = db.prepare("DELETE FROM program_schedule WHERE stationId=? AND id=? AND state='pending'")
+      .run(req.params.id,req.params.jobId);
+    if (result.changes) {
+      removed = true;
+      insertAuditEvent(db, {
+        organizationId: req.user.organizationId, userId: req.user.id,
+        action: 'PROGRAM_SCHEDULE_CANCELLED', resourceType: 'Station', resourceId: req.params.id,
+        details: { jobId: req.params.jobId }, ipAddress: req.ip
+      });
+      db.exec('COMMIT');
+    } else {
+      db.exec('ROLLBACK');
+    }
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+  if (!removed) return res.status(409).json({success:false,error:'The event is no longer pending'});
   res.json({success:true});
 });
 
@@ -159,6 +225,11 @@ scenesRouter.post(root + '/schedule-list', authorize('schedule:manage'), validat
       }
       ids.push(id);
     }
+    insertAuditEvent(db, {
+      organizationId: req.user.organizationId, userId: req.user.id,
+      action: 'PROGRAM_SCHEDULE_LIST_CREATED', resourceType: 'Station', resourceId: stationId,
+      details: { count: ids.length }, ipAddress: req.ip
+    });
     db.exec('COMMIT');
     res.status(201).json({success:true,data:{ids}});
   } catch (error) {
@@ -245,15 +316,28 @@ scenesRouter.put(root, authorize('video:manage'), validateBody(schema), (req, re
       return res.status(400).json({ success:false, error:'Select an available video and optional overlay image' });
     }
   }
-  if (req.body.id) {
-    const count = db.prepare('SELECT count(*) AS total FROM program_named_scenes WHERE stationId=?').get(id).total;
-    if (count >= 32 && !readScene(db, id, req.body.id)) {
-      return res.status(409).json({ success: false, error: 'The station has reached its 32 named scene limit' });
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (req.body.id) {
+      const count = db.prepare('SELECT count(*) AS total FROM program_named_scenes WHERE stationId=?').get(id).total;
+      if (count >= 32 && !readScene(db, id, req.body.id)) {
+        db.exec('ROLLBACK');
+        return res.status(409).json({ success: false, error: 'The station has reached its 32 named scene limit' });
+      }
+      db.prepare('INSERT INTO program_named_scenes VALUES (?,?,?) ON CONFLICT(stationId,id) DO UPDATE SET scene=excluded.scene')
+        .run(id, req.body.id, JSON.stringify(req.body));
+    } else {
+      db.prepare('INSERT OR REPLACE INTO program_local_scenes VALUES (?,?)').run(id, JSON.stringify(req.body));
     }
-    db.prepare('INSERT INTO program_named_scenes VALUES (?,?,?) ON CONFLICT(stationId,id) DO UPDATE SET scene=excluded.scene')
-      .run(id, req.body.id, JSON.stringify(req.body));
-  } else {
-    db.prepare('INSERT OR REPLACE INTO program_local_scenes VALUES (?,?)').run(id, JSON.stringify(req.body));
+    insertAuditEvent(db, {
+      organizationId: req.user.organizationId, userId: req.user.id,
+      action: 'PROGRAM_SCENE_SAVED', resourceType: 'Station', resourceId: id,
+      details: { sceneId: req.body.id ?? null, type: req.body.type ?? 'local' }, ipAddress: req.ip
+    });
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
   }
   res.json({ success:true });
 });

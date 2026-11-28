@@ -62,6 +62,8 @@ model User {
   passwordHash    String
   fullName        String
   isActive        Boolean              @default(true)
+  role            RoleType             @default(OPERATOR)
+  organizationId  String?              @default("default-org")
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 
@@ -70,6 +72,7 @@ model User {
   auditLogs       AuditLog[]
 
   @@index([email])
+  @@index([organizationId, role])
 }
 
 model OrganizationMember {
@@ -282,4 +285,559 @@ model SystemSetting {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, key])
+}
+
+enum MediaKindEnum {
+  VIDEO
+  AUDIO
+  IMAGE
+}
+
+enum MediaCategoryEnum {
+  MOVIES
+  TV_PROGRAMS
+  VIDEO_CLIPS
+  MUSIC
+  AUDIO_RECORDINGS
+  ADVERTISEMENTS
+  PROMOTIONS
+  INTROS_OUTROS
+  FALLBACK
+  IMAGES
+  CHANNEL_LOGOS
+  GRAPHICS
+}
+
+enum MediaUploadStatusEnum {
+  UPLOADING
+  UPLOADED
+  CANCELLED
+  EXPIRED
+  FAILED
+}
+
+enum MediaProcessingStatusEnum {
+  UPLOADING
+  UPLOADED
+  VALIDATING
+  PROCESSING
+  READY
+  FAILED
+  QUARANTINED
+}
+
+enum MediaCompatibilityEnum {
+  PENDING
+  DIRECT_PLAYBACK
+  REMUX_REQUIRED
+  TRANSCODE_REQUIRED
+  UNSUPPORTED
+}
+
+model MediaAsset {
+  id                     String                    @id @default(uuid())
+  organizationId         String
+  folder                 String                    @default("") @db.VarChar(160)
+  title                  String                    @db.VarChar(250)
+  description            String                    @default("") @db.Text
+  category               MediaCategoryEnum
+  kind                   MediaKindEnum
+  tags                   Json
+  channelIds             Json
+  originalFilename       String                    @db.VarChar(255)
+  storageKey             String                    @unique @db.VarChar(255)
+  thumbnailKey           String?                   @db.VarChar(255)
+  previewKey             String?                   @db.VarChar(255)
+  sizeBytes              BigInt
+  checksumSha256         String                    @db.Char(64)
+  mimeType               String                    @db.VarChar(120)
+  containerFormat        String?                   @db.VarChar(80)
+  videoCodec             String?                   @db.VarChar(80)
+  audioCodec             String?                   @db.VarChar(80)
+  width                  Int?
+  height                 Int?
+  frameRate              Float?
+  durationSeconds        Float?
+  bitrateBps             BigInt?
+  audioChannels          Int?
+  sampleRateHz           Int?
+  hasVideo               Boolean                   @default(false)
+  hasAudio               Boolean                   @default(false)
+  uploadStatus           MediaUploadStatusEnum     @default(UPLOADED)
+  processingStatus       MediaProcessingStatusEnum @default(VALIDATING)
+  broadcastCompatibility MediaCompatibilityEnum    @default(PENDING)
+  compatibilityNotes     Json
+  errorReason            String?                   @db.VarChar(500)
+  createdByUserId        String
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+
+  jobs                   MediaProcessingJob[]
+
+  @@index([organizationId, category, createdAt])
+  @@index([organizationId, processingStatus, createdAt])
+  @@index([organizationId, checksumSha256])
+}
+
+model MediaUploadSession {
+  id                     String                @id @default(uuid())
+  organizationId         String
+  createdByUserId        String
+  title                  String                @db.VarChar(250)
+  description            String                @default("") @db.Text
+  folder                 String                @default("") @db.VarChar(160)
+  category               MediaCategoryEnum
+  tags                   Json
+  channelIds             Json
+  originalFilename       String                @db.VarChar(255)
+  declaredMimeType       String                @default("") @db.VarChar(120)
+  expectedSizeBytes      BigInt
+  expectedChecksumSha256 String?               @db.Char(64)
+  receivedBytes          BigInt                @default(0)
+  chunkSizeBytes         Int
+  uploadKey              String                @unique @db.VarChar(255)
+  status                 MediaUploadStatusEnum @default(UPLOADING)
+  assetId                String?
+  errorReason            String?               @db.VarChar(500)
+  expiresAt              BigInt
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
+  @@index([organizationId, status, expiresAt])
+}
+
+model MediaProcessingJob {
+  id             String     @id @default(uuid())
+  assetId        String
+  organizationId String
+  jobType        String     @db.VarChar(60)
+  status         String     @db.VarChar(40)
+  attempts       Int        @default(0)
+  errorReason    String?    @db.VarChar(500)
+  startedAt      DateTime?
+  completedAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  asset          MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+}
+
+model MediaPlaylist {
+  id              String        @id @default(uuid())
+  organizationId  String
+  name            String        @db.VarChar(160)
+  description     String        @default("") @db.Text
+  kind            MediaKindEnum
+  channelId       String?       @db.VarChar(100)
+  items           Json
+  createdByUserId String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([organizationId, kind, createdAt])
+}
+
+enum VideoSourceTypeEnum {
+  UPLOADED_FILE
+  MOVIE
+  PLAYLIST
+  OBS_LIVE
+  HLS_STREAM
+  RTMP_STREAM
+  SRT_STREAM
+  RTSP_STREAM
+  REMOTE_VIDEO_URL
+  SERVER_FILE
+}
+
+enum VideoSourceConnectionEnum {
+  ONLINE
+  OFFLINE
+  CONNECTING
+  RECONNECTING
+  DEGRADED
+  ERROR
+}
+
+enum VideoSourceAvailabilityEnum {
+  AVAILABLE
+  UNAVAILABLE
+  PROBING
+  FALLBACK_ACTIVE
+}
+
+model VideoSource {
+  id                  String                      @id @default(uuid())
+  organizationId      String
+  stationId           String?                     @db.VarChar(100)
+  name                String                      @db.VarChar(200)
+  description         String                      @default("") @db.Text
+  sourceType          VideoSourceTypeEnum
+  mediaAssetId        String?                     @db.VarChar(100)
+  playlistId          String?                     @db.VarChar(100)
+  streamUrl           String?                     @db.VarChar(2048)
+  encryptedSecret     String?                     @db.Text
+  serverFilePath      String?                     @db.VarChar(500)
+  connectionStatus    VideoSourceConnectionEnum   @default(OFFLINE)
+  availabilityStatus  VideoSourceAvailabilityEnum @default(UNAVAILABLE)
+  width               Int?
+  height              Int?
+  frameRate           Float?
+  videoCodec          String?                     @db.VarChar(80)
+  audioCodec          String?                     @db.VarChar(80)
+  hasAudio            Boolean                     @default(false)
+  previewThumbnailKey String?                     @db.VarChar(255)
+  lastConnectedAt     DateTime?
+  lastProbedAt        DateTime?
+  lastError           String?                     @db.VarChar(500)
+  reconnectEnabled    Boolean                     @default(true)
+  maxRetries          Int                         @default(5)
+  retryCount          Int                         @default(0)
+  backoffBaseMs       Int                         @default(2000)
+  backoffMaxMs        Int                         @default(30000)
+  fallbackSourceId    String?                     @db.VarChar(100)
+  fallbackAssetId     String?                     @db.VarChar(100)
+  fallbackMode        String                      @default("SLATE") @db.VarChar(40)
+  createdByUserId     String
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+
+  @@index([organizationId, sourceType, createdAt])
+  @@index([organizationId, stationId])
+  @@index([organizationId, availabilityStatus])
+}
+
+model AuthSession {
+  id          String @id
+  userId      String @db.VarChar(100)
+  refreshHash String @db.VarChar(255)
+  expiresAt   BigInt
+
+  @@index([expiresAt])
+  @@index([userId])
+}
+
+model PasswordResetGrant {
+  userId    String @id @db.VarChar(100)
+  tokenHash String @unique @db.VarChar(255)
+  expiresAt BigInt
+
+  @@index([expiresAt])
+}
+
+model AuthMfa {
+  userId          String @id @db.VarChar(100)
+  encryptedSecret String @db.Text
+  enabled         Int
+  pendingUntil    BigInt
+  lastStep        BigInt @default(-1)
+}
+
+model AuthMfaRecoveryCode {
+  userId   String @db.VarChar(100)
+  codeHash String @db.VarChar(255)
+
+  @@id([userId, codeHash])
+}
+
+model StationAgentCredential {
+  stationId  String @id @db.VarChar(100)
+  generation Int
+}
+
+model StationAutomation {
+  id             String  @id @default(uuid())
+  organizationId String  @db.VarChar(100)
+  userId         String  @db.VarChar(100)
+  stationId      String  @db.VarChar(100)
+  name           String  @db.VarChar(200)
+  action         String  @db.VarChar(80)
+  sceneName      String? @db.VarChar(250)
+  runAt          String? @db.VarChar(80)
+  status         String  @db.VarChar(60)
+  error          String? @db.Text
+
+  @@index([organizationId, stationId])
+  @@index([status, runAt])
+}
+
+model PlayoutAsRun {
+  id         String  @id @default(uuid())
+  stationId  String  @db.VarChar(100)
+  itemId     String  @db.VarChar(100)
+  title      String  @db.VarChar(250)
+  category   String  @db.VarChar(80)
+  sceneName  String? @db.VarChar(250)
+  plannedAt  BigInt?
+  startedAt  BigInt?
+  endedAt    BigInt?
+  outcome    String  @db.VarChar(80)
+  detail     String? @db.Text
+
+  @@index([stationId, startedAt])
+}
+
+enum AudioSourceTypeEnum {
+  UPLOADED_AUDIO
+  MUSIC_PLAYLIST
+  INTERNET_RADIO
+  ICECAST_STREAM
+  SHOUTCAST_STREAM
+  MICROPHONE_INPUT
+  VIDEO_EXTRACTED_AUDIO
+  OBS_AUDIO_INPUT
+  ADVERTISEMENT_AUDIO
+  FALLBACK_AUDIO
+  GENERATED_SILENCE
+}
+
+enum AudioSourceStateEnum {
+  DISABLED
+  CONNECTING
+  ONLINE
+  PLAYING
+  PAUSED
+  RECONNECTING
+  UNAVAILABLE
+  FALLBACK_ACTIVE
+  ERROR
+}
+
+model AudioSource {
+  id                  String               @id @default(uuid())
+  organizationId      String               @db.VarChar(100)
+  channelId           String               @db.VarChar(100)
+  name                String               @db.VarChar(200)
+  description         String               @default("") @db.Text
+  sourceType          AudioSourceTypeEnum
+  mediaAssetId        String?              @db.VarChar(100)
+  playlistId          String?              @db.VarChar(100)
+  videoSourceId       String?              @db.VarChar(100)
+  obsInputName        String?              @db.VarChar(200)
+  streamUrl           String?              @db.VarChar(2048)
+  encryptedSecret     String?              @db.Text
+  enabled             Boolean              @default(true)
+  muted               Boolean              @default(false)
+  soloMonitoring      Boolean              @default(false)
+  volumeLinear        Float                @default(1.0)
+  gainDb              Float                @default(0.0)
+  delayMs             Int                  @default(0)
+  fadeInMs            Int                  @default(500)
+  fadeOutMs           Int                  @default(500)
+  priority            Int                  @default(50)
+  duckingTrigger      Boolean              @default(false)
+  duckingTarget       Boolean              @default(true)
+  repeatMode          String               @default("REPEAT_PLAYLIST") @db.VarChar(40)
+  shuffleEnabled      Boolean              @default(false)
+  crossfadeMs         Int                  @default(1500)
+  currentTrackIndex   Int                  @default(0)
+  currentTrackAssetId String?              @db.VarChar(100)
+  playbackPositionMs  Int                  @default(0)
+  remainingDurationMs Int?
+  state               AudioSourceStateEnum @default(ONLINE)
+  measuredRmsDbfs     Float                @default(-90.0)
+  measuredPeakDbfs    Float                @default(-90.0)
+  clippingDetected    Boolean              @default(false)
+  codec               String?              @db.VarChar(60)
+  sampleRateHz        Int?                 @default(48000)
+  channels            Int?                 @default(2)
+  streamMetadata      String?              @db.VarChar(500)
+  reconnectEnabled    Boolean              @default(true)
+  maxRetries          Int                  @default(5)
+  retryCount          Int                  @default(0)
+  backoffBaseMs       Int                  @default(2000)
+  backoffMaxMs        Int                  @default(30000)
+  fallbackSourceId    String?              @db.VarChar(100)
+  fallbackAssetId     String?              @db.VarChar(100)
+  lastConnectedAt     DateTime?
+  lastError           String?              @db.VarChar(500)
+  createdByUserId     String               @db.VarChar(100)
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  @@index([organizationId, channelId, priority])
+  @@index([organizationId, sourceType])
+}
+
+model AudioMixerConfig {
+  channelId               String   @db.VarChar(100)
+  organizationId          String   @db.VarChar(100)
+  masterVolumeLinear      Float    @default(1.0)
+  masterGainDb            Float    @default(0.0)
+  masterMuted             Boolean  @default(false)
+  routingMode             String   @default("MIX_VIDEO_AND_EXTERNAL_AUDIO") @db.VarChar(60)
+  cameraAudioMuted        Boolean  @default(true)
+  cameraAudioGainDb       Float    @default(-6.0)
+  duckingEnabled          Boolean  @default(true)
+  duckingThresholdDbfs    Float    @default(-32.0)
+  duckingReductionDb      Float    @default(-12.0)
+  duckingAttackMs         Int      @default(120)
+  duckingHoldMs           Int      @default(300)
+  duckingReleaseMs        Int      @default(600)
+  crossfadeDurationMs     Int      @default(1500)
+  adAudioPolicy           String   @default("REPLACE_MUSIC_PAUSE_PLAYLIST") @db.VarChar(60)
+  adActive                Boolean  @default(false)
+  peakLimiterCeilingDbfs  Float    @default(-1.0)
+  loudnessNormalization   Boolean  @default(false)
+  targetLoudnessLufs      Float    @default(-23.0)
+  silenceThresholdDbfs    Float    @default(-60.0)
+  silenceTimeoutSeconds   Int      @default(10)
+  fallbackSourceId        String?  @db.VarChar(100)
+  fallbackAssetId         String?  @db.VarChar(100)
+  outputCodec             String   @default("aac_lc") @db.VarChar(40)
+  outputSampleRateHz      Int      @default(48000)
+  outputChannels          Int      @default(2)
+  outputBitrateKbps       Int      @default(192)
+  measuredMasterRmsDbfs   Float    @default(-90.0)
+  measuredMasterPeakDbfs  Float    @default(-90.0)
+  masterClippingPrevented Boolean  @default(false)
+  updatedByUserId         String?  @db.VarChar(100)
+  updatedAt               DateTime @updatedAt
+
+  @@id([channelId, organizationId])
+}
+
+model ChannelPlayoutConfig {
+  channelId            String    @db.VarChar(100)
+  organizationId       String    @db.VarChar(100)
+  playoutMode          String    @default("CAMERA_ROTATION") @db.VarChar(40)
+  desiredState         String    @default("STOPPED") @db.VarChar(40)
+  runtimeState         String    @default("STOPPED") @db.VarChar(40)
+  autoStart            Boolean   @default(false)
+  width                Int       @default(1920)
+  height               Int       @default(1080)
+  frameRate            Int       @default(25)
+  videoCodec           String    @default("h264") @db.VarChar(40)
+  videoBitrateKbps     Int       @default(4500)
+  gopFrames            Int       @default(50)
+  audioCodec           String    @default("aac_lc") @db.VarChar(40)
+  audioSampleRateHz    Int       @default(48000)
+  audioChannels        Int       @default(2)
+  audioBitrateKbps     Int       @default(192)
+  hwAccelMode          String    @default("AUTO_WITH_SW_FALLBACK") @db.VarChar(40)
+  activeEncoder        String    @default("x264enc") @db.VarChar(60)
+  cameraSequence       Json
+  cameraRepeat         Boolean   @default(true)
+  activeCameraIndex    Int       @default(0)
+  currentSourceId      String?   @db.VarChar(100)
+  movieQueue           Json
+  movieRepeat          Boolean   @default(true)
+  activeMovieIndex     Int       @default(0)
+  currentMediaAssetId  String?   @db.VarChar(100)
+  playbackPositionMs   Int       @default(0)
+  remainingDurationMs  Int?
+  paused               Boolean   @default(false)
+  adSchedulePolicy     Json
+  adState              Json
+  graphicsConfig       Json
+  fallbackConfig       Json
+  fallbackActive       Boolean   @default(false)
+  emergencyActive      Boolean   @default(false)
+  emergencySourceId    String?   @db.VarChar(100)
+  networkAllowlist     Json
+  outputUdpPort        Int?
+  outputHlsEnabled     Boolean   @default(true)
+  outputSrtUrl         String?   @db.VarChar(1024)
+  workerSessionId      String?   @db.VarChar(100)
+  workerPid            Int?
+  restartCount         Int       @default(0)
+  lastHeartbeatAt      DateTime?
+  lastOutputAt         DateTime?
+  lastRecoveryAt       DateTime?
+  lastError            String?   @db.VarChar(500)
+  revision             Int       @default(1)
+  updatedByUserId      String?   @db.VarChar(100)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@id([channelId, organizationId])
+  @@index([organizationId, desiredState, runtimeState])
+}
+
+model ChannelScheduleRevision {
+  id                    String    @id @default(uuid())
+  organizationId        String    @db.VarChar(100)
+  channelId             String    @db.VarChar(100)
+  revisionNumber        Int
+  name                  String    @default("Broadcast Schedule") @db.VarChar(200)
+  timezone              String    @default("UTC") @db.VarChar(80)
+  lifecycleState        String    @default("DRAFT") @db.VarChar(40)
+  activationPolicy      String    @default("APPLY_NEXT_BOUNDARY") @db.VarChar(60)
+  effectiveFromUtc      DateTime?
+  gapPolicy             String    @default("FALLBACK_PLAYLIST") @db.VarChar(60)
+  gapFallbackAssetId    String?   @db.VarChar(100)
+  gapFallbackSourceId   String?   @db.VarChar(100)
+  gapFallbackPlaylistId String?   @db.VarChar(100)
+  events                Json
+  templates             Json
+  validationSummary     Json
+  publishedByUserId     String?   @db.VarChar(100)
+  publishedAt           DateTime?
+  createdByUserId       String    @db.VarChar(100)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([organizationId, channelId, revisionNumber])
+  @@index([organizationId, channelId, lifecycleState, revisionNumber])
+}
+
+model ChannelSchedulerExecutionState {
+  channelId               String    @db.VarChar(100)
+  organizationId          String    @db.VarChar(100)
+  activeRevisionId        String?   @db.VarChar(100)
+  activeRevisionNumber    Int       @default(0)
+  pendingRevisionId       String?   @db.VarChar(100)
+  pendingActivationPolicy String?   @db.VarChar(60)
+  pendingEffectiveAtUtc   DateTime?
+  timezone                String    @default("UTC") @db.VarChar(80)
+  schedulerRunning        Boolean   @default(false)
+  holdActive              Boolean   @default(false)
+  emergencyOverrideActive Boolean   @default(false)
+  manualOverrideActive    Boolean   @default(false)
+  overrideSourceId        String?   @db.VarChar(100)
+  overrideExpiresAtUtc    DateTime?
+  currentTrackStates      Json
+  claimedOccurrenceIds    Json
+  interruptedProgramState Json
+  gapFallbackActive       Boolean   @default(false)
+  leaseOwnerId            String?   @db.VarChar(100)
+  leaseExpiresAt          BigInt    @default(0)
+  lastHeartbeatAt         DateTime?
+  lastReconciledAt        DateTime?
+  updatedAt               DateTime  @updatedAt
+
+  @@id([channelId, organizationId])
+}
+
+model ChannelAsRunLog {
+  id                 String    @id @default(uuid())
+  organizationId     String    @db.VarChar(100)
+  channelId          String    @db.VarChar(100)
+  revisionId         String?   @db.VarChar(100)
+  revisionNumber     Int       @default(0)
+  eventId            String    @db.VarChar(100)
+  occurrenceId       String    @unique @db.VarChar(180)
+  trackType          String    @db.VarChar(60)
+  executionMode      String    @db.VarChar(60)
+  title              String    @db.VarChar(250)
+  category           String    @default("PROGRAM") @db.VarChar(80)
+  mediaAssetId       String?   @db.VarChar(100)
+  videoSourceId      String?   @db.VarChar(100)
+  audioSourceId      String?   @db.VarChar(100)
+  plannedStartUtc    DateTime
+  actualStartUtc     DateTime
+  plannedEndUtc      DateTime
+  actualEndUtc       DateTime?
+  plannedDurationMs  Int
+  actualDurationMs   Int?
+  status             String    @default("RUNNING") @db.VarChar(60)
+  interruptionReason String?   @db.VarChar(250)
+  resumeOffsetMs     Int       @default(0)
+  workerConfirmed    Boolean   @default(false)
+  details            Json
+  createdAt          DateTime  @default(now())
+
+  @@index([organizationId, channelId, actualStartUtc])
 }

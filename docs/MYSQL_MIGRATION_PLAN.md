@@ -10,3 +10,13 @@ Move the Phase 15 persistence foundation immediately after isolated Linux stagin
 6. Production cutover requires approval and a maintenance window. Snapshot SQLite, media references and application release, protect key backups, fence writes and execute the measured final delta. Keep independent output on the approved continuity path and reconcile runtime state before granting new control writes. Abort on parity, authorization, restore or receiver-budget failure.
 
 Rollback before new MySQL writes by restoring the previous control binaries and pointing them to the intact SQLite and media snapshot. After new writes begin, replay a rehearsed compatible change journal or restore with the owner-approved data-loss budget and reconciliation plan. Never flip back silently or overwrite the active database. Retain protected evidence for both directions.
+
+## Phase 15 foundation implementation and local MariaDB/MySQL rehearsal evidence
+
+The Phase 15 repository foundation (`backend/src/infrastructure/database/mysql-prisma.js`, `backend/src/infrastructure/repositories/prisma-repositories.js`, `backend/src/infrastructure/repositories/prisma-station-repository.js`, and `backend/scripts/sqlite-to-mysql-migration.js`) is now implemented and verified against the local MariaDB/MySQL server (`10.4.32-MariaDB` on `127.0.0.1:3306`) via `backend/verification/mysql-migration-rehearsal.js`:
+
+- Opens the source SQLite database strictly in read-only mode (`new DatabaseSync(sqlitePath, { readOnly: true })`).
+- Includes version-controlled Prisma SQL migrations under [backend/database/prisma/migrations/20261128_0001_phase15_and_phase05_foundation/migration.sql](../backend/database/prisma/migrations/20261128_0001_phase15_and_phase05_foundation/migration.sql).
+- Pushes the complete MySQL schema (`backend/database/prisma/schema.prisma`) and migrates organizations, users, studios, stations, media assets, upload sessions, playlists, video sources, audio sources, audio mixer configurations and audit logs inside an atomic Prisma transaction.
+- Verifies exact row-count parity, field values, AES-256-GCM encrypted secret preservation, tenant isolation, media reference-deletion blocks (`PLAYLIST_REFERENCE`, `VIDEO_SOURCE_REFERENCE`, and `AUDIO_SOURCE_REFERENCE`), concurrent write transactions, direct MySQL CRUD operations, and `EXPLAIN` index utilization without storing media BLOBs in MySQL.
+- **Database Engine Distinction**: Local verification executed against the local **MariaDB (`10.4.32-MariaDB`)** server on `127.0.0.1:3306`. Production target verification on **Oracle MySQL 8.4** remains tracked as an open staging/production gate (`G48`).

@@ -63,6 +63,32 @@ if (!/^\d+$/.test(mediaQuotaMiB) || Number(mediaQuotaMiB) < 1 || Number(mediaQuo
   throw new Error('MCR_MEDIA_STATION_QUOTA_MIB must be a whole number from 1 to 16384.');
 }
 
+function parsePositiveInt(name, defaultValue, min, max) {
+  const raw = process.env[name] ?? String(defaultValue);
+  if (!/^\d+$/.test(raw) || Number(raw) < min || Number(raw) > max) {
+    throw new Error(`${name} must be a whole number from ${min} to ${max}.`);
+  }
+  return Number(raw);
+}
+
+const mediaStorageRoot = path.resolve(
+  projectRoot,
+  process.env.MCR_MEDIA_STORAGE_ROOT || 'backend/storage/media-library'
+);
+const mediaImportDir = process.env.MCR_MEDIA_IMPORT_DIR
+  ? path.resolve(projectRoot, process.env.MCR_MEDIA_IMPORT_DIR)
+  : path.join(mediaStorageRoot, 'imports');
+const mediaMaxFileSizeMiB = parsePositiveInt('MCR_MEDIA_MAX_FILE_SIZE_MIB', 20480, 1, 102400);
+const mediaOrgQuotaMiB = parsePositiveInt('MCR_MEDIA_ORG_QUOTA_MIB', 512000, 1, 2097152);
+const mediaMaxDurationSeconds = parsePositiveInt('MCR_MEDIA_MAX_DURATION_SECONDS', 28800, 1, 259200);
+const mediaMaxConcurrentUploads = parsePositiveInt('MCR_MEDIA_MAX_CONCURRENT_UPLOADS', 4, 1, 32);
+const mediaMaxProcessingJobs = parsePositiveInt('MCR_MEDIA_MAX_PROCESSING_JOBS', 2, 1, 16);
+const mediaChunkMaxMiB = parsePositiveInt('MCR_MEDIA_CHUNK_MAX_MIB', 64, 1, 256);
+const mediaUploadSessionTtlMinutes = parsePositiveInt('MCR_MEDIA_UPLOAD_TTL_MINUTES', 1440, 5, 10080);
+const mediaMinFreeDiskMiB = parsePositiveInt('MCR_MEDIA_MIN_FREE_DISK_MIB', 512, 16, 1048576);
+const mediaLowDiskAlertMiB = parsePositiveInt('MCR_MEDIA_LOW_DISK_ALERT_MIB', 2048, 32, 1048576);
+const mediaProcessingTimeoutMs = parsePositiveInt('MCR_MEDIA_PROCESSING_TIMEOUT_MS', 120000, 5000, 3600000);
+
 const proxyAddresses = process.env.MCR_TRUST_PROXY_CIDRS?.trim();
 const trustedProxies = proxyAddresses ? proxyAddresses.split(',').map(value => value.trim()) : [];
 for (const entry of trustedProxies) {
@@ -119,6 +145,18 @@ export const env = Object.freeze({
   DATABASE_URL: process.env.DATABASE_URL || '',
   SQLITE_DB_PATH: sqliteDbPath,
   MEDIA_STATION_QUOTA_BYTES: Number(mediaQuotaMiB) * 1024 ** 2,
+  MEDIA_STORAGE_ROOT: mediaStorageRoot,
+  MEDIA_IMPORT_DIR: mediaImportDir,
+  MEDIA_MAX_FILE_SIZE_BYTES: mediaMaxFileSizeMiB * 1024 ** 2,
+  MEDIA_ORG_QUOTA_BYTES: mediaOrgQuotaMiB * 1024 ** 2,
+  MEDIA_MAX_DURATION_SECONDS: mediaMaxDurationSeconds,
+  MEDIA_MAX_CONCURRENT_UPLOADS: mediaMaxConcurrentUploads,
+  MEDIA_MAX_PROCESSING_JOBS: mediaMaxProcessingJobs,
+  MEDIA_CHUNK_MAX_BYTES: mediaChunkMaxMiB * 1024 ** 2,
+  MEDIA_UPLOAD_TTL_MS: mediaUploadSessionTtlMinutes * 60 * 1000,
+  MEDIA_MIN_FREE_DISK_BYTES: mediaMinFreeDiskMiB * 1024 ** 2,
+  MEDIA_LOW_DISK_ALERT_BYTES: mediaLowDiskAlertMiB * 1024 ** 2,
+  MEDIA_PROCESSING_TIMEOUT_MS: mediaProcessingTimeoutMs,
   DEPLOYMENT_REVISION: onRender && /^[0-9a-f]{40}$/i.test(process.env.RENDER_GIT_COMMIT || '')
     ? process.env.RENDER_GIT_COMMIT : null,
   SQLITE_PERSISTENCE: onRender ? (renderDisk ? 'persistent-disk' : 'unverified') : 'local',

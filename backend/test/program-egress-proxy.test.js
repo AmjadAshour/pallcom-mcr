@@ -5,6 +5,19 @@ import test from 'node:test';
 import { createProgramEgressProxy } from '../scripts/program-egress-proxy.js';
 
 test('Program egress connects only to the configured authority and the validated IPv4 address', async () => {
+  for (const invalidSource of [
+    'http://source.example.test/feed',
+    'https://169.254.169.254/latest/meta-data',
+    'https://127.0.0.1/feed',
+    'https://10.0.0.1/feed',
+    'https://192.168.1.1/feed',
+    'https://localhost/feed',
+    'https://camera.local/feed',
+    'https://metadata.internal/feed',
+    'https://[::1]/feed'
+  ]) {
+    assert.throws(() => createProgramEgressProxy(invalidSource), /public HTTPS source/, invalidSource);
+  }
   const receiver = createServer(socket => socket.pipe(socket));
   receiver.listen(0, '127.0.0.1');
   await once(receiver, 'listening');

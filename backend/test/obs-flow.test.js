@@ -123,12 +123,12 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
 
   const stationResource = '/stations/' + station.id;
   const roleExpectations = [
-    ['SUPER_ADMIN', 200, 400, 400, 200, 200],
-    ['ORG_ADMIN', 200, 400, 400, 200, 200],
-    ['STUDIO_MANAGER', 200, 400, 400, 403, 200],
-    ['OPERATOR', 200, 403, 400, 403, 200],
-    ['VIEWER', 200, 403, 403, 403, 403],
-    ['constructor', 403, 403, 403, 403, 403]
+    ['SUPER_ADMIN', 200, 400, 400, 200, 200, 409, 400, 400],
+    ['ORG_ADMIN', 200, 400, 400, 200, 200, 409, 400, 400],
+    ['STUDIO_MANAGER', 200, 400, 400, 403, 200, 409, 400, 400],
+    ['OPERATOR', 200, 403, 400, 403, 200, 409, 400, 403],
+    ['VIEWER', 200, 403, 403, 403, 403, 403, 403, 403],
+    ['constructor', 403, 403, 403, 403, 403, 403, 403, 403]
   ];
   // Invalid write bodies distinguish permission acceptance from denial without changing station state.
   const permissionRequests = [
@@ -136,7 +136,10 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
     ['POST', '/stations'],
     ['POST', stationResource + '/scenes/switch'],
     ['GET', '/users'],
-    ['GET', '/logs']
+    ['GET', '/logs'],
+    ['POST', stationResource + '/program/hls/playback-link'],
+    ['PUT', stationResource + '/playout'],
+    ['POST', '/pairing/generate']
   ];
   for (const [role, ...expectedStatuses] of roleExpectations) {
     const actor = role === admin.role ? admin : await RepositoryFactory.getUserRepository().create({
@@ -165,7 +168,7 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
     for (const [index, [method, path]] of permissionRequests.entries()) {
       const response = await fetch(address + '/api/v1' + path, {
         method, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: method === 'POST' ? '{}' : undefined
+        body: method === 'POST' || method === 'PUT' ? '{}' : undefined
       });
       assert.equal(response.status, expectedStatuses[index], role + ' ' + method + ' ' + path);
       await response.text();
@@ -240,6 +243,27 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
   await settingsUpdate.text();
   const updatedStation = await request(assignedPath, { organizationId: admin.organizationId });
   assert.equal((await updatedStation.json()).data.obsPort, 4456);
+  stationDb.exec(`CREATE TEMP TRIGGER reject_station_write_audit BEFORE INSERT ON audit_logs
+    WHEN NEW.action IN ('STATION_CREATED', 'STATION_UPDATED', 'STATION_DELETED')
+    BEGIN SELECT RAISE(ABORT, 'fixture station audit write failed'); END`);
+  try {
+    const failedStationCreate = await stationWrite('POST', '/stations', { name: 'Rolled back station' });
+    assert.equal(failedStationCreate.status, 500);
+    await failedStationCreate.text();
+    assert.equal(stationDb.prepare('SELECT id FROM stations WHERE name = ?').get('Rolled back station'), undefined);
+
+    const failedStationUpdate = await stationWrite('PATCH', assignedPath, { obsPort: 4457 });
+    assert.equal(failedStationUpdate.status, 500);
+    await failedStationUpdate.text();
+    assert.equal((await (await request(assignedPath, { organizationId: admin.organizationId })).json()).data.obsPort, 4456);
+
+    const failedStationDelete = await stationWrite('DELETE', assignedPath);
+    assert.equal(failedStationDelete.status, 500);
+    await failedStationDelete.text();
+    assert.equal((await request(assignedPath, { organizationId: admin.organizationId })).status, 200);
+  } finally {
+    stationDb.exec('DROP TRIGGER reject_station_write_audit');
+  }
   for (const studioId of [foreignStudio, randomUUID()]) {
     const createDenied = await stationWrite('POST', '/stations', { name: 'Fixture rejected station', studioId });
     const updateDenied = await stationWrite('PATCH', assignedPath, { studioId });
@@ -390,6 +414,54 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
   const replayCommand = once(agent, 'message');
   assert.equal((await request(replayPath, { ...authorized, method: 'POST' })).status, 200);
   assert.equal(JSON.parse((await replayCommand)[0]).command, 'SaveReplayBuffer');
+
+  for (const [suffix, body] of [
+    ['/audio/volume', { inputName: 'Host Mic', inputVolumeMul: 0.5 }],
+    ['/audio/mute', { inputName: 'Host Mic', inputMuted: true }],
+    ['/studio-mode/transition', undefined]
+  ]) {
+    const foreignControl = await request(stationPath + suffix, {
+      method: 'POST', organizationId: 'another-organization', body
+    });
+    assert.equal(foreignControl.status, 404, 'foreign control ' + suffix);
+    await foreignControl.text();
+  }
+  for (const [suffix, invalidBody] of [
+    ['/audio/volume', { inputName: 'Host Mic', inputVolumeMul: 0.5, extra: true }],
+    ['/audio/volume', { inputName: 'Host Mic' }],
+    ['/audio/mute', { inputName: 'Host Mic', inputMuted: true, extra: true }],
+    ['/scene-item', { sceneName: 'Program B', sceneItemId: 1, enabled: true, extra: true }],
+    ['/scenes/cut', { sceneName: 'Program B', extra: true }]
+  ]) {
+    const rejected = await request(stationPath + suffix, { ...authorized, method: 'POST', body: invalidBody });
+    assert.equal(rejected.status, 400, 'strict schema ' + suffix);
+    await rejected.text();
+  }
+  const volumeCommand = once(agent, 'message');
+  assert.equal((await request(stationPath + '/audio/volume', {
+    ...authorized, method: 'POST', body: { inputName: 'Host Mic', inputVolumeMul: 0.8 }
+  })).status, 200);
+  assert.equal(JSON.parse((await volumeCommand)[0]).command, 'SetInputVolume');
+  const muteCommand = once(agent, 'message');
+  assert.equal((await request(stationPath + '/audio/mute', {
+    ...authorized, method: 'POST', body: { inputName: 'Host Mic', inputMuted: true }
+  })).status, 200);
+  assert.equal(JSON.parse((await muteCommand)[0]).command, 'SetInputMute');
+  const transitionCommand = once(agent, 'message');
+  assert.equal((await request(stationPath + '/studio-mode/transition', {
+    ...authorized, method: 'POST'
+  })).status, 200);
+  assert.equal(JSON.parse((await transitionCommand)[0]).command, 'TriggerStudioModeTransition');
+  for (const action of ['AUDIO_VOLUME_UPDATED', 'AUDIO_MUTE_UPDATED', 'TriggerStudioModeTransition']) {
+    const auditRow = getSqliteDatabase().prepare(
+      'SELECT userId, organizationId, resourceId FROM audit_logs WHERE action = ? AND resourceId = ?'
+    ).get(action, station.id);
+    assert.deepEqual(auditRow && { ...auditRow }, {
+      userId: admin.id,
+      organizationId: admin.organizationId,
+      resourceId: station.id
+    }, 'audit row for ' + action);
+  }
   const graphicsPath = stationPath + '/graphics';
   const { data: graphics } = await (await request(graphicsPath, authorized)).json();
   assert.match(graphics.token, /^[a-f0-9]{64}$/);
@@ -442,6 +514,31 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
   assert.equal((await request(graphicsPath + '/link', { ...authorized, method: 'DELETE' })).status, 204);
   assert.equal((await request('/public/graphics/' + newestLink.token)).status, 404);
   assert.equal((await (await request(graphicsPath, authorized)).json()).data.token, null);
+  for (const action of [
+    'GRAPHICS_OVERLAY_SAVED', 'GRAPHICS_OVERLAY_PUBLISHED', 'GRAPHICS_OVERLAY_DELETED',
+    'GRAPHICS_LINK_ROTATED', 'GRAPHICS_LINK_REVOKED'
+  ]) {
+    const row = getSqliteDatabase().prepare(
+      'SELECT userId, organizationId, resourceId FROM audit_logs WHERE action = ? AND resourceId = ?'
+    ).get(action, station.id);
+    assert.deepEqual(row && { ...row }, {
+      userId: admin.id,
+      organizationId: admin.organizationId,
+      resourceId: station.id
+    }, 'graphics audit ' + action);
+  }
+  assert.equal((await request(stationPath + '/playout/control', {
+    ...authorized, method: 'POST', body: { action: 'release', extra: true }
+  })).status, 400);
+  assert.equal((await request(stationPath + '/playout/control', {
+    method: 'POST', organizationId: 'another-organization', body: { action: 'release' }
+  })).status, 404);
+  assert.equal((await request(stationPath + '/playout/control', {
+    ...authorized, method: 'POST', body: { action: 'release' }
+  })).status, 200);
+  assert.ok(getSqliteDatabase().prepare(
+    "SELECT 1 FROM audit_logs WHERE action = 'PLAYOUT_CONTROL' AND resourceId = ?"
+  ).get(station.id));
   assert.equal((await request(stationPath, { method: 'DELETE', organizationId: 'another-organization' })).status, 404);
   const macro = await request('/automations', {
     ...authorized, method: 'POST',
@@ -580,6 +677,17 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
   const persisted = getSqliteDatabase().prepare('SELECT stationId FROM program_station_selection WHERE singleton=1').get();
   assert.equal(persisted.stationId, station.id);
   assert.equal((await (await request(stationPath + '/program', authorized)).json()).data.configured, true);
+  assert.equal((await fetch(address + '/api/v1' + stationPath + '/program/local-scene/schedule-hold', {
+    method: 'PUT',
+    headers: { Authorization: 'Bearer ' + macroOperatorToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ held: true })
+  })).status, 403);
+  assert.equal((await request(stationPath + '/program/local-scene/schedule-hold', {
+    ...authorized, method: 'PUT', body: { held: true }
+  })).status, 200);
+  assert.ok(getSqliteDatabase().prepare(
+    "SELECT 1 FROM audit_logs WHERE action = 'PROGRAM_SCHEDULE_HOLD' AND resourceId = ?"
+  ).get(station.id));
   const viewerAccount = await RepositoryFactory.getUserRepository().findByEmail('viewer@roles.mcr.local');
   const viewerToken = CryptoService.signAccessToken({ sub: viewerAccount.id, sid: createSession(viewerAccount.id).id });
   for (const [suffix, viewerStatus] of [
@@ -684,9 +792,12 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
     'SELECT id FROM stations WHERE id = ?',
     'SELECT id FROM pairing_tokens WHERE stationId = ?',
     'SELECT id FROM station_automations WHERE stationId = ?',
-    'SELECT stationId FROM station_agent_credentials WHERE stationId = ?'
+    'SELECT stationId FROM station_agent_credentials WHERE stationId = ?',
+    'SELECT stationId FROM program_station_selection WHERE stationId = ?',
+    'SELECT stationId FROM program_schedule_hold WHERE stationId = ?',
+    'SELECT id FROM program_schedule WHERE stationId = ?'
   ]) {
-    assert.equal(db.prepare(query).get(station.id), undefined);
+    assert.equal(db.prepare(query).get(station.id), undefined, query);
   }
   assert.equal(db.prepare("SELECT action FROM audit_logs WHERE resourceId = ? AND action = 'STATION_DELETED'").get(station.id).action,
     'STATION_DELETED');
@@ -725,9 +836,13 @@ test('MCR pairs a station, scopes access, and waits for its OBS acknowledgement'
   assert.deepEqual((await foreignResults.json()).data.map(event => event.id), [foreignEvent.id]);
 
   const createUser = (email, role = 'VIEWER', extraFields = {}) => request('/users', {
-    ...authorized, method: 'POST', body: { fullName: 'Fixture Viewer', email, password: 'Fixture-only-password', role, ...extraFields }
+    ...authorized, method: 'POST', body: {
+      fullName: 'Fixture Viewer', email, password: 'Fixture-only-password',
+      role, currentPassword: 'Test-only-password', ...extraFields
+    }
   });
   assert.equal((await createUser('privileged@mcr.local', 'SUPER_ADMIN')).status, 400);
+  assert.equal((await createUser('wrong-admin-pass@mcr.local', 'VIEWER', { currentPassword: 'Wrong-admin-password' })).status, 403);
   const extraField = await createUser('extra-field@mcr.local', 'VIEWER', { organizationId: outsider.organizationId });
   assert.equal(extraField.status, 400);
   assert.equal(await RepositoryFactory.getUserRepository().findByEmail('extra-field@mcr.local'), null);

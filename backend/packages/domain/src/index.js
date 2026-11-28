@@ -136,3 +136,68 @@ export class IObsGateway {
   async isStationConnected(stationId) { throw new Error('Not implemented'); }
   subscribe(stationId, callback) { throw new Error('Not implemented'); }
 }
+
+export class IMediaRepository {
+  async createUploadSession(session, actor) { throw new Error('Not implemented'); }
+  async findUploadSession(id, organizationId) { throw new Error('Not implemented'); }
+  async listUploadSessions(organizationId, filters = {}) { throw new Error('Not implemented'); }
+  async updateUploadSessionProgress(id, organizationId, progress) { throw new Error('Not implemented'); }
+  async cancelUploadSession(id, organizationId, actor) { throw new Error('Not implemented'); }
+  async expireAbandonedUploads(nowMs) { throw new Error('Not implemented'); }
+  async createAsset(asset, actor) { throw new Error('Not implemented'); }
+  async updateAssetProcessing(id, organizationId, updates) { throw new Error('Not implemented'); }
+  async updateAssetMetadata(id, organizationId, updates, actor) { throw new Error('Not implemented'); }
+  async findAssetById(id, organizationId) { throw new Error('Not implemented'); }
+  async listAssets(organizationId, query = {}) { throw new Error('Not implemented'); }
+  async getStorageUsage(organizationId) { throw new Error('Not implemented'); }
+  async inspectAssetReferences(id, organizationId) { throw new Error('Not implemented'); }
+  async deleteAsset(id, organizationId, actor) { throw new Error('Not implemented'); }
+  async createPlaylist(playlist, actor) { throw new Error('Not implemented'); }
+  async listPlaylists(organizationId, filters = {}) { throw new Error('Not implemented'); }
+  async deletePlaylist(id, organizationId, actor) { throw new Error('Not implemented'); }
+}
+
+export class IVideoSourceRepository {
+  async createSource(source, actor) { throw new Error('Not implemented'); }
+  async updateSource(id, organizationId, updates, actor) { throw new Error('Not implemented'); }
+  async updateSourceProbeState(id, organizationId, probeResult) { throw new Error('Not implemented'); }
+  async findSourceById(id, organizationId) { throw new Error('Not implemented'); }
+  async listSources(organizationId, filters = {}) { throw new Error('Not implemented'); }
+  async deleteSource(id, organizationId, actor) { throw new Error('Not implemented'); }
+}
+
+export class IAudioRepository {
+  async createAudioSource(source, actor) { throw new Error('Not implemented'); }
+  async updateAudioSource(id, organizationId, updates, actor) { throw new Error('Not implemented'); }
+  async updateAudioSourceRuntimeState(id, organizationId, runtimeState) { throw new Error('Not implemented'); }
+  async findAudioSourceById(id, organizationId, options = {}) { throw new Error('Not implemented'); }
+  async listAudioSources(organizationId, filters = {}) { throw new Error('Not implemented'); }
+  async deleteAudioSource(id, organizationId, actor) { throw new Error('Not implemented'); }
+  async getChannelMixerConfig(channelId, organizationId) { throw new Error('Not implemented'); }
+  async saveChannelMixerConfig(channelId, organizationId, config, actor) { throw new Error('Not implemented'); }
+}
+
+export class IChannelPlayoutRepository {
+  async getChannelConfig(channelId, organizationId) { throw new Error('Not implemented'); }
+  async listChannelConfigs(organizationId) { throw new Error('Not implemented'); }
+  async saveChannelConfig(channelId, organizationId, updates, actor) { throw new Error('Not implemented'); }
+  async updateRuntimeCheckpoint(channelId, organizationId, checkpoint) { throw new Error('Not implemented'); }
+}
+
+export class IBroadcastSchedulerRepository {
+  async getOrCreateDraftRevision(channelId, organizationId, actor) { throw new Error('Not implemented'); }
+  async saveDraftRevision(channelId, organizationId, draftPayload, actor) { throw new Error('Not implemented'); }
+  async markRevisionValidated(revisionId, organizationId, validationSummary, actor) { throw new Error('Not implemented'); }
+  async publishRevision(channelId, organizationId, options, actor) { throw new Error('Not implemented'); }
+  async getActivePublishedRevision(channelId, organizationId) { throw new Error('Not implemented'); }
+  async getRevisionById(revisionId, organizationId) { throw new Error('Not implemented'); }
+  async listRevisions(channelId, organizationId) { throw new Error('Not implemented'); }
+  async getExecutionState(channelId, organizationId) { throw new Error('Not implemented'); }
+  async updateExecutionState(channelId, organizationId, updates, options = {}) { throw new Error('Not implemented'); }
+  async acquireSchedulerLease(channelId, organizationId, ownerId, nowMs, ttlMs) { throw new Error('Not implemented'); }
+  async releaseSchedulerLease(channelId, organizationId, ownerId) { throw new Error('Not implemented'); }
+  async claimOccurrence(record, options = {}) { throw new Error('Not implemented'); }
+  async createAsRunRecord(record) { throw new Error('Not implemented'); }
+  async updateAsRunRecord(id, organizationId, updates) { throw new Error('Not implemented'); }
+  async listAsRunRecords(channelId, organizationId, filters = {}) { throw new Error('Not implemented'); }
+}

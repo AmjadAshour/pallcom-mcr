@@ -5,6 +5,7 @@ import { AddLiveBlock, MediaLibraryDrawer } from '../components/playout/MediaLib
 import { PlayoutHud } from '../components/playout/PlayoutHud.jsx';
 import { AsRunLog, PlayoutSettings } from '../components/playout/PlayoutSettings.jsx';
 import { PlayoutTimeline } from '../components/playout/PlayoutTimeline.jsx';
+import { MultiTrackBroadcastScheduler } from '../components/playout/MultiTrackBroadcastScheduler.jsx';
 import { usePlayout } from '../components/playout/usePlayout.js';
 import { api, stationPath } from '../context/api.js';
 import { useMcrStore } from '../context/useMcrStore.js';
@@ -189,6 +190,9 @@ export function SchedulerPage() {
   const { permissions } = useOutletContext();
   const ar = language === 'ar';
   const canControl = permissions.includes('*') || permissions.includes('station:control');
+  const canManageSchedule = permissions.includes('*') || permissions.includes('schedule:manage');
+  const canPublishSchedule = permissions.includes('*') || permissions.includes('schedule:publish');
+  const canEmergency = permissions.includes('*') || permissions.includes('broadcast:emergency');
   const station = stations.find((item) => item.id === selectedStationId) ?? stations[0];
   return <section className="space-y-4">
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-3">
@@ -201,6 +205,17 @@ export function SchedulerPage() {
         </select>
       </label>
     </header>
+    {station && (
+      <MultiTrackBroadcastScheduler
+        key={`mt-sched-${station.id}`}
+        stationId={station.id}
+        language={language}
+        canManageSchedule={canManageSchedule}
+        canPublishSchedule={canPublishSchedule}
+        canControlStation={canControl}
+        canEmergency={canEmergency}
+      />
+    )}
     {station ? <StationPlayout key={station.id} {...{ station, canControl, ar }} />
       : <p className="text-sm text-zinc-400">{ar ? 'أضف محطة لتشغيل الجدول.' : 'Add a station to configure its playout.'}</p>}
   </section>;

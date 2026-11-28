@@ -25,6 +25,135 @@ const obsEvents = new Map(Object.entries({
   mediaPlaybackEnded: z.object({ inputName: name })
 }));
 
+const playoutAssetSchema = z.object({
+  assetId: z.string().regex(/^[a-f0-9]{16}:[\w-]{1,1600}$/),
+  title: name,
+  durationMs: z.number().int().min(1).max(86400000).optional(),
+  width: z.number().int().min(1).max(16384).optional(),
+  height: z.number().int().min(1).max(16384).optional(),
+  health: z.enum(['ready', 'missing', 'unreadable'])
+});
+
+const sceneSourceSchema = z.object({
+  sceneItemId: z.number().int(),
+  sourceName: name,
+  sceneItemEnabled: z.boolean(),
+  inputKind: z.string().max(128).nullable().optional(),
+  sourceType: z.string().max(128).nullable().optional(),
+  sceneItemIndex: nonnegative.int().optional()
+});
+
+const audioInputSchema = z.object({
+  name,
+  volumeMul: nonnegative.max(20).optional(),
+  volumeDb: z.number().min(-200).max(100).optional(),
+  muted: z.boolean(),
+  levelDb: z.number().min(-200).max(100).optional(),
+  peakDb: z.number().min(-200).max(100).optional()
+});
+
+const stationSnapshotSchema = z.object({
+  scenes: z.array(z.object({
+    name,
+    sources: z.array(sceneSourceSchema).max(200).default([])
+  })).max(200).optional(),
+  audioInputs: z.array(audioInputSchema).max(200).optional(),
+  currentProgramScene: name.nullable().optional(),
+  currentPreviewScene: name.nullable().optional(),
+  studioModeEnabled: z.boolean().optional(),
+  transitions: z.array(name).max(100).optional(),
+  transitionName: name.nullable().optional(),
+  transitionDuration: nonnegative.int().max(60000).nullable().optional(),
+  streamStatus: z.enum(['STOPPED', 'STARTING', 'STREAMING', 'STOPPING']).optional(),
+  streamBitrateKbps: nonnegative.int().nullable().optional(),
+  streamReconnecting: z.boolean().optional(),
+  replayBufferActive: z.boolean().nullable().optional(),
+  lastReplaySavedAt: z.string().datetime().nullable().optional(),
+  recordStatus: z.enum(['STOPPED', 'STARTING', 'RECORDING', 'PAUSED', 'STOPPING']).optional()
+});
+
+const defaultAckSchema = z.object({
+  accepted: z.boolean().optional(),
+  success: z.boolean().optional(),
+  currentProgramScene: name.optional(),
+  outputActive: z.boolean().optional()
+});
+
+const commandResults = new Map(Object.entries({
+  ScanPlayoutMedia: z.object({
+    assets: z.array(playoutAssetSchema).max(500),
+    warnings: z.array(z.string().max(512)).max(50).default([]),
+    truncated: z.boolean().default(false)
+  }),
+  CheckPlayoutMedia: z.array(playoutAssetSchema).max(200),
+  CuePlayoutMedia: z.object({
+    id: name,
+    sceneName: name.optional(),
+    inputName: name.optional()
+  }),
+  TakePlayoutMedia: z.object({
+    sceneName: name,
+    inputName: name.nullable().optional(),
+    cursorMs: nonnegative.optional()
+  }),
+  TakePlayoutScene: z.object({
+    sceneName: name
+  }),
+  GetPlayoutStatus: z.object({
+    sceneName: name,
+    mediaState: name.nullable().optional(),
+    cursorMs: nonnegative.nullable().optional(),
+    durationMs: nonnegative.nullable().optional()
+  }),
+  ApplyPlayoutGraphics: z.object({
+    warnings: z.array(z.string().max(512)).max(50).optional()
+  }),
+  GetStationSnapshot: stationSnapshotSchema,
+  GetSceneScreenshot: z.object({
+    imageData: z.string().max(1024 * 1024).regex(/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/)
+  }),
+  GetSceneList: z.object({
+    scenes: z.array(z.object({
+      sceneName: name,
+      sceneIndex: nonnegative.int().optional()
+    })).max(200),
+    currentProgramSceneName: name.nullable().optional(),
+    currentPreviewSceneName: name.nullable().optional()
+  }),
+  GetStats: z.object({
+    activeFps: nonnegative.optional(),
+    cpuUsage: nonnegative.optional(),
+    memoryUsage: nonnegative.optional(),
+    outputSkippedFrames: nonnegative.int().optional(),
+    renderTotalFrames: nonnegative.int().optional()
+  }),
+  GetVersion: z.object({
+    obsVersion: name.optional(),
+    obsWebSocketVersion: name.optional(),
+    rpcVersion: nonnegative.int().optional(),
+    platform: name.optional()
+  }),
+  StartReplayBuffer: defaultAckSchema,
+  StopReplayBuffer: defaultAckSchema,
+  SaveReplayBuffer: defaultAckSchema,
+  SetSceneItemEnabled: defaultAckSchema,
+  CutToScene: defaultAckSchema,
+  SetTBarPosition: defaultAckSchema,
+  SetTextInput: defaultAckSchema,
+  SetStudioModeEnabled: defaultAckSchema,
+  SetCurrentSceneTransition: defaultAckSchema,
+  SetCurrentSceneTransitionDuration: defaultAckSchema,
+  SetCurrentProgramScene: defaultAckSchema,
+  SetCurrentPreviewScene: defaultAckSchema,
+  StartStream: defaultAckSchema,
+  StopStream: defaultAckSchema,
+  StartRecord: defaultAckSchema,
+  StopRecord: defaultAckSchema,
+  SetInputVolume: defaultAckSchema,
+  SetInputMute: defaultAckSchema,
+  TriggerStudioModeTransition: defaultAckSchema
+}));
+
 export class AgentGateway extends EventEmitter {
   constructor() {
     super();
@@ -163,7 +292,13 @@ export class AgentGateway extends EventEmitter {
         const pending = agent.pendingCommands.get(msg.correlationId);
         clearTimeout(pending.timer);
         agent.pendingCommands.delete(msg.correlationId);
-        pending.resolve(msg.result);
+        const schema = commandResults.get(pending.command);
+        const parsed = schema?.safeParse(msg.result ?? {});
+        if (!parsed?.success) {
+          pending.reject(Object.assign(new Error('Invalid agent command result'), { statusCode: 502 }));
+          return;
+        }
+        pending.resolve(parsed.data);
       }
       return;
     }

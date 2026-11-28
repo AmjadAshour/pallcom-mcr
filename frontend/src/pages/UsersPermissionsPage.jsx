@@ -59,22 +59,23 @@ export function UsersPermissionsPage() {
 
   return (
     <section className="space-y-4">
-      <h1 className="text-lg font-semibold">Users and permissions</h1>
+      <h1 className="text-lg font-semibold">{ar ? 'المستخدمون والصلاحيات' : 'Users and permissions'}</h1>
       <p className="text-sm text-zinc-400">{user.fullName} · {user.role}</p>
-      <p className="text-sm text-zinc-400">{user.permissions.includes('*') ? 'All permissions' : user.permissions.join(', ')}</p>
+      <p className="text-sm text-zinc-400">{user.permissions.includes('*') ? (ar ? 'جميع الصلاحيات' : 'All permissions') : user.permissions.join(', ')}</p>
       {error && <p role="alert" className="text-red-300">{error}</p>}
       {canManage && <>
         <form onSubmit={addUser} className="flex flex-wrap items-end gap-3 rounded border border-zinc-800 p-3">
-          <label>Full name<input className="block rounded bg-zinc-800 p-2" name="fullName" required minLength={2} /></label>
-          <label>Email<input className="block rounded bg-zinc-800 p-2" name="email" type="email" required /></label>
-          <label>Initial password<input className="block rounded bg-zinc-800 p-2" name="password" type="password" minLength={12} autoComplete="new-password" required /></label>
-          <label>Role<select className="block rounded bg-zinc-800 p-2" name="role" defaultValue="VIEWER">
+          <label>{ar ? 'الاسم الكامل' : 'Full name'}<input className="block rounded bg-zinc-800 p-2" name="fullName" required minLength={2} maxLength={120} /></label>
+          <label>{ar ? 'البريد الإلكتروني' : 'Email'}<input className="block rounded bg-zinc-800 p-2" name="email" type="email" maxLength={254} required /></label>
+          <label>{ar ? 'كلمة المرور الأولية' : 'Initial password'}<input className="block rounded bg-zinc-800 p-2" name="password" type="password" minLength={12} maxLength={128} autoComplete="new-password" required /></label>
+          <label>{ar ? 'الدور' : 'Role'}<select className="block rounded bg-zinc-800 p-2" name="role" defaultValue="VIEWER">
             <option>VIEWER</option><option>OPERATOR</option><option>STUDIO_MANAGER</option>
           </select></label>
-          <button disabled={busy} className="rounded bg-cyan-800 px-3 py-2">Create account</button>
+          <label>{ar ? 'كلمة مرورك الحالية' : 'Your current password'}<input className="block rounded bg-zinc-800 p-2" name="currentPassword" type="password" autoComplete="current-password" maxLength={4096} required /></label>
+          <button disabled={busy} className="rounded bg-cyan-800 px-3 py-2">{ar ? 'إنشاء حساب' : 'Create account'}</button>
         </form>
         <ul className="space-y-2">{users.map((item) => <li key={item.id} className="rounded border border-zinc-800 p-3">
-          <strong>{item.fullName}</strong><p className="text-sm text-zinc-400">{item.email} · {item.role} · {item.isActive ? 'Active' : 'Inactive'}</p>
+          <strong>{item.fullName}</strong><p className="text-sm text-zinc-400">{item.email} · {item.role} · {item.isActive ? (ar ? 'نشط' : 'Active') : (ar ? 'معطّل' : 'Inactive')}</p>
           {item.id !== user.id && ['STUDIO_MANAGER', 'OPERATOR', 'VIEWER'].includes(item.role) &&
             <div className="mt-2 flex flex-wrap gap-3">
             <button type="button" className="underline" disabled={busy} onClick={() => setManagedAccount({ id: item.id, action: 'status' })}>

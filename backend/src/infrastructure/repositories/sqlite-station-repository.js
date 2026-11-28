@@ -1,5 +1,6 @@
 import { IStationRepository, Station } from '@mcr/domain';
 import { getSqliteDatabase } from '../database/sqlite.js';
+import { insertAuditEvent } from './sqlite-audit-repository.js';
 import crypto from 'node:crypto';
 
 export class SqliteStationRepository extends IStationRepository {
@@ -33,8 +34,7 @@ export class SqliteStationRepository extends IStationRepository {
     return rows.map((r) => new Station(r));
   }
 
-  async create(data) {
-    if (data.studioId != null) this.#requireOrganizationStudio(data.studioId, data.organizationId);
+  async create(data, audit = null) {
     const id = data.id || crypto.randomUUID();
     const now = new Date().toISOString();
     const slug = data.slug || data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -55,39 +55,55 @@ export class SqliteStationRepository extends IStationRepository {
       )
     `);
 
-    stmt.run(
-      id,
-      data.organizationId,
-      data.studioId || null,
-      data.name,
-      slug,
-      data.description || '',
-      data.ipAddress || '127.0.0.1',
-      data.obsPort || 4455,
-      data.encryptedPassword || null,
-      data.status || 'OFFLINE',
-      data.streamStatus || 'STOPPED',
-      data.recordStatus || 'STOPPED',
-      data.currentProgramScene || null,
-      data.currentPreviewScene || null,
-      data.fps || 0.0,
-      data.cpuUsage || 0.0,
-      data.memoryUsage || 0.0,
-      data.droppedFrames || 0,
-      data.lastHeartbeat || null,
-      now,
-      now
-    );
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (data.studioId != null) this.#requireOrganizationStudio(data.studioId, data.organizationId);
+      stmt.run(
+        id,
+        data.organizationId,
+        data.studioId || null,
+        data.name,
+        slug,
+        data.description || '',
+        data.ipAddress || '127.0.0.1',
+        data.obsPort || 4455,
+        data.encryptedPassword || null,
+        data.status || 'OFFLINE',
+        data.streamStatus || 'STOPPED',
+        data.recordStatus || 'STOPPED',
+        data.currentProgramScene || null,
+        data.currentPreviewScene || null,
+        data.fps || 0.0,
+        data.cpuUsage || 0.0,
+        data.memoryUsage || 0.0,
+        data.droppedFrames || 0,
+        data.lastHeartbeat || null,
+        now,
+        now
+      );
+      if (audit) {
+        insertAuditEvent(this.db, {
+          organizationId: data.organizationId,
+          userId: audit.userId,
+          action: 'STATION_CREATED',
+          resourceType: 'Station',
+          resourceId: id,
+          details: { name: data.name, ipAddress: data.ipAddress || '127.0.0.1' },
+          ipAddress: audit.ipAddress
+        });
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
 
     return await this.findById(id, data.organizationId);
   }
 
-  async update(id, organizationId, updateData) {
+  async update(id, organizationId, updateData, audit = null) {
     const existing = await this.findById(id, organizationId);
     if (!existing) return null;
-    if (updateData.studioId != null && updateData.studioId !== existing.studioId) {
-      this.#requireOrganizationStudio(updateData.studioId, organizationId);
-    }
 
     const now = new Date().toISOString();
     const fields = [];
@@ -107,16 +123,38 @@ export class SqliteStationRepository extends IStationRepository {
       }
     }
 
-    if (fields.length === 0) return existing;
-
-    fields.push('updatedAt = ?');
-    values.push(now);
-    values.push(id);
-    values.push(organizationId);
-
-    const query = `UPDATE stations SET ${fields.join(', ')} WHERE id = ? AND organizationId = ?`;
-    const stmt = this.db.prepare(query);
-    stmt.run(...values);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const current = await this.findById(id, organizationId);
+      if (!current) {
+        this.db.exec('ROLLBACK');
+        return null;
+      }
+      if (updateData.studioId != null && updateData.studioId !== current.studioId) {
+        this.#requireOrganizationStudio(updateData.studioId, organizationId);
+      }
+      if (fields.length > 0) {
+        const updateFields = [...fields, 'updatedAt = ?'];
+        const updateValues = [...values, now, id, organizationId];
+        const query = `UPDATE stations SET ${updateFields.join(', ')} WHERE id = ? AND organizationId = ?`;
+        this.db.prepare(query).run(...updateValues);
+      }
+      if (audit) {
+        insertAuditEvent(this.db, {
+          organizationId,
+          userId: audit.userId,
+          action: 'STATION_UPDATED',
+          resourceType: 'Station',
+          resourceId: id,
+          details: { updatedFields: Object.keys(updateData) },
+          ipAddress: audit.ipAddress
+        });
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
 
     return await this.findById(id, organizationId);
   }
@@ -145,19 +183,40 @@ export class SqliteStationRepository extends IStationRepository {
     stmt.run(...values);
   }
 
-  async delete(id, organizationId) {
+  async delete(id, organizationId, audit = null) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const { changes } = this.db.prepare('DELETE FROM stations WHERE id = ? AND organizationId = ?').run(id, organizationId);
       if (changes) {
         this.db.prepare('DELETE FROM pairing_tokens WHERE stationId = ?').run(id);
+        this.db.prepare('DELETE FROM station_agent_credentials WHERE stationId = ?').run(id);
         this.db.prepare('DELETE FROM station_graphics WHERE stationId = ?').run(id);
         this.db.prepare('DELETE FROM program_watermarks WHERE stationId = ?').run(id);
-        for (const table of ['ad_assets','ad_frames','program_ads']) this.db.prepare('DELETE FROM ' + table + ' WHERE stationId=?').run(id);
+        this.db.prepare('DELETE FROM program_tickers WHERE stationId = ?').run(id);
+        this.db.prepare('DELETE FROM program_local_scenes WHERE stationId = ?').run(id);
+        this.db.prepare('DELETE FROM program_named_scenes WHERE stationId = ?').run(id);
+        this.db.prepare('DELETE FROM program_resume_source WHERE stationId = ?').run(id);
+        this.db.prepare('DELETE FROM program_schedule_hold WHERE stationId = ?').run(id);
+        this.db.prepare('DELETE FROM program_schedule_daily WHERE jobId IN (SELECT id FROM program_schedule WHERE stationId = ?)').run(id);
+        this.db.prepare('DELETE FROM program_schedule WHERE stationId = ?').run(id);
+        this.db.prepare('DELETE FROM program_station_selection WHERE stationId = ?').run(id);
+        for (const table of ['ad_asset_audio', 'ad_assets', 'ad_frames', 'program_ads']) {
+          this.db.prepare('DELETE FROM ' + table + ' WHERE stationId=?').run(id);
+        }
         this.db.prepare('DELETE FROM station_graphics_tokens WHERE stationId = ?').run(id);
         this.db.prepare('DELETE FROM station_playout WHERE stationId = ?').run(id);
         this.db.prepare('DELETE FROM playout_as_run WHERE stationId = ?').run(id);
         this.db.prepare('DELETE FROM station_automations WHERE stationId = ? AND organizationId = ?').run(id, organizationId);
+        if (audit) {
+          insertAuditEvent(this.db, {
+            organizationId,
+            userId: audit.userId,
+            action: 'STATION_DELETED',
+            resourceType: 'Station',
+            resourceId: id,
+            ipAddress: audit.ipAddress
+          });
+        }
       }
       this.db.exec('COMMIT');
       return changes > 0;

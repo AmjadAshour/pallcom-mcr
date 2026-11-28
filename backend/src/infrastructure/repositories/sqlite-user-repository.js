@@ -59,6 +59,10 @@ export class SqliteUserRepository extends IUserRepository {
         if (!current || current.organizationId !== data.organizationId || !hasPermission(current.role, 'user:manage')) {
           throw Object.assign(new Error('Access denied.'), { status: 403 });
         }
+        if (actor.passwordHash &&
+            this.db.prepare('SELECT passwordHash FROM users WHERE id = ?').get(actor.id)?.passwordHash !== actor.passwordHash) {
+          throw Object.assign(new Error('Current password is incorrect.'), { status: 403 });
+        }
         if (!managedAccountRoles.includes(role)) {
           throw Object.assign(new Error('Role is not assignable.'), { status: 403 });
         }

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { Calendar, FileText, Grid, Layers, LayoutDashboard, Menu, Radio, Settings, Sliders, Sparkles, Users, Volume2, Zap } from 'lucide-react';
+import { Calendar, FileText, Film, Grid, Layers, LayoutDashboard, Menu, Radio, Settings, Sliders, Sparkles, Users, Volume2, Zap } from 'lucide-react';
 import { useMcrStore } from '../../context/useMcrStore.js';
 import { translations } from '../../i18n/translations.js';
 
@@ -16,12 +16,14 @@ export function Sidebar({ permissions }) {
       ['/', t.overview, LayoutDashboard],
       ['/live', t.liveControl, Sliders],
       ['/multiview', t.multiview, Grid],
+      ['/media', ar ? 'مكتبة الوسائط' : 'Media library', Film],
       ['/sources', ar ? 'المصادر والجدولة' : 'Sources & scheduling', Layers],
       ['/graphics', t.graphics, Sparkles],
       ['/audio', t.audioMixer, Volume2],
     ] },
     { title: ar ? 'الإدارة' : 'Administration', items: [
       ['/stations', t.stations, Radio],
+      ['/settings', t.settings, Settings],
       ...(can('audit:read') ? [['/logs', t.activityLogs, FileText]] : []),
       ...(can('user:manage') ? [['/users', t.usersPermissions, Users]] : []),
     ] },
@@ -29,7 +31,6 @@ export function Sidebar({ permissions }) {
   const integrations = [
     ['/scheduler', ar ? 'جدولة OBS' : 'OBS scheduler', Calendar],
     ['/macros', ar ? 'أتمتة OBS' : 'OBS automation', Zap],
-    ...(can('station:manage') ? [['/settings', ar ? 'اقتران OBS' : 'OBS pairing', Settings]] : []),
   ];
 
   function links(items) {

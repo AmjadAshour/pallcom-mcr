@@ -41,19 +41,22 @@ export const ObsCommandSchema = z.object({
   params: z.record(z.string(), z.any()).default({})
 });
 
-export const SceneSwitchSchema = z.object({
-  sceneName: z.string().min(1, 'Scene name is required'),
+export const SceneSwitchSchema = z.strictObject({
+  sceneName: z.string().min(1, 'Scene name is required').max(250),
   preview: z.boolean().default(false)
 });
 
-export const AudioVolumeSchema = z.object({
-  inputName: z.string().min(1),
+export const AudioVolumeSchema = z.strictObject({
+  inputName: z.string().min(1).max(250),
   inputVolumeMul: z.number().min(0).max(1).optional(),
   inputVolumeDb: z.number().min(-100).max(20).optional()
-});
+}).refine(
+  (data) => data.inputVolumeMul !== undefined || data.inputVolumeDb !== undefined,
+  { message: 'Provide inputVolumeMul or inputVolumeDb' }
+);
 
-export const AudioMuteSchema = z.object({
-  inputName: z.string().min(1),
+export const AudioMuteSchema = z.strictObject({
+  inputName: z.string().min(1).max(250),
   inputMuted: z.boolean()
 });
 

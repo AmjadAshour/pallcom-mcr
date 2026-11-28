@@ -14,3 +14,18 @@ These numerical limits are proposed pass/fail thresholds, not measurements. The 
 | Resource headroom | On approved deployment hardware, p95 CPU and GPU utilization each at most 75% of allocated capacity, RAM usage at most 80%, media+scratch usage below 80%, p95 network utilization at most 75% and no sustained growth or OOM. Record CPU, RAM, GPU/VRAM, storage throughput/latency, network drops and channel/provider bandwidth. Record hardware fallback evidence separately. |
 
 Use controlled fault injection and keep recovery windows distinct from routine transitions and endurance. Close release only when security, recovery and playback evidence are accepted. See [update and rollback](UPDATE_AND_ROLLBACK_PLAN.md).
+
+## Phase Six Measured Local Acceptance Evidence vs. Open 72-Hour Staging Gate
+
+In Phase Six, the automated two-channel Full HD acceptance fixture ([two-channel-playout-acceptance.js](../backend/verification/two-channel-playout-acceptance.js)) verified:
+
+- **Simultaneous Two-Channel Full HD 1920×1080 H.264/AAC Output**: Independent `ffprobe` and `ffmpeg` UDP receivers confirmed concurrent `1920×1080 @ 25 fps` H.264 video and `48 kHz` stereo AAC audio on Channel One (`UDP 26310`) and Channel Two (`UDP 26312`).
+- **Channel One Camera Rotation & Independent Audio**: Automatic sequential rotation between live 1080p camera feeds with `1.2 ms`–`4.8 ms` pad-switch latency, zero encoder restarts, continuous independent `440 Hz` music audio while camera audio remained muted, automatic `FALLBACK_ACTIVE` transition when all cameras were excluded, and automatic recovery to `RUNNING` when cameras returned.
+- **Channel Two 2+ Hour Full HD Movie Playout, Ad Insertion & Safe Seeking**: Generated, uploaded (via resumable chunked upload with SHA-256 verification), and validated a **2-hour-and-5-minute (`7,500.021`-second / 125-minute)** `1920×1080` MP4 movie, verified automatic transition from an intro clip and advertisement break into the 2h05m feature film, and verified keyframe seeking to the `+3,600,000 ms` (1-hour) mark without loading the movie into memory.
+- **Cross-Channel Fault Isolation & Worker Crash Recovery**: Killed Channel One's GStreamer worker with `SIGKILL`, verified Channel Two continued broadcasting with `0` restarts, and verified Channel One automatically respawned its worker (`restartCount: 1`) and returned to `RUNNING` within `~2.1 seconds`.
+- **Open Production Endurance Gates**: The 30-minute, 2-hour wall-clock, and mandatory **72-hour continuous two-channel Full HD soak test** as well as **10+ GB file upload endurance** remain open until executed on the dedicated Linux/MySQL staging server. See [PERFORMANCE_BENCHMARKS.md](PERFORMANCE_BENCHMARKS.md).
+
+
+## Phase Seven - Broadcast Scheduler (2026-11-28)
+Implemented and verified locally (SQLite, local MariaDB 10.4.32 only; Oracle MySQL 8.4 gate G48 remains open). Evidence: `backend/test/broadcast-scheduler.test.js` (5 tests: DST, recurrence, validation, RBAC/draft/publish/concurrency/delete-protection, simulated 72-hour schedule), `backend/verification/two-channel-scheduler-acceptance.js` (two real 1920x1080@25 GStreamer channels, FFprobe/FFmpeg receivers, mid-movie ad resume at 5899 ms, camera failure/recovery, manual override, draft isolation, cross-channel isolation), `backend/verification/mysql-migration-rehearsal.js` (scheduler tables parity), full workspace suite 52/52 passing, frontend build passing.
+Not claimed: a real 72-hour wall-clock endurance run (open production gate); the 72-hour test is validation plus a deterministic clock simulation. Manual override currently sets state flags and pauses scheduled starts; it does not switch the live source itself. Production security gates remain open. Phase Eight not started.

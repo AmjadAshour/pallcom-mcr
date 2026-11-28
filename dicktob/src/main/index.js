@@ -58,10 +58,10 @@ ipcMain.handle('mcr:api:request', async (event, { endpoint, method = 'GET', data
   if (typeof endpoint !== 'string') throw new Error('Invalid API endpoint');
   const url = new URL(endpoint, dashboardUrl);
   if (url.origin !== dashboardUrl || !url.pathname.startsWith('/api/v1/') ||
-    !['GET', 'POST', 'PATCH', 'DELETE'].includes(method)) throw new Error('Invalid API request');
+    !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) throw new Error('Invalid API request');
   const response = await session.defaultSession.fetch(url.toString(), {
     method, credentials: 'include', redirect: 'error',
-    headers: method === 'GET' ? undefined : { 'Content-Type': 'application/json' },
+    headers: method === 'GET' ? undefined : { 'Content-Type': 'application/json', Origin: dashboardUrl },
     body: method === 'GET' ? undefined : JSON.stringify(data)
   });
   return response.json();

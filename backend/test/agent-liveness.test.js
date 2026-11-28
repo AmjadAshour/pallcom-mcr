@@ -43,6 +43,57 @@ test('Agent gateway bounds and liveness', async () => {
   socket.receive({ type: 'TELEMETRY', data: { obsConnected: true } });
   assert.equal(gateway.stationStatus('station'), 'ONLINE');
 
+  const scanPromise = gateway.sendCommand('station', 'ScanPlayoutMedia');
+  const scanSent = socket.sent.pop();
+  socket.receive({
+    type: 'COMMAND_ACK',
+    correlationId: scanSent.correlationId,
+    result: {
+      assets: [{
+        assetId: '0123456789abcdef:Y2xpcC5tcDQ',
+        title: 'clip.mp4',
+        durationMs: 12000,
+        width: 1280,
+        height: 720,
+        health: 'ready',
+        file: 'C:\\private\\media\\clip.mp4'
+      }],
+      warnings: ['Skipped unreadable folder'],
+      truncated: false,
+      internalRoot: 'C:\\private\\media'
+    }
+  });
+  assert.deepEqual(await scanPromise, {
+    assets: [{
+      assetId: '0123456789abcdef:Y2xpcC5tcDQ',
+      title: 'clip.mp4',
+      durationMs: 12000,
+      width: 1280,
+      height: 720,
+      health: 'ready'
+    }],
+    warnings: ['Skipped unreadable folder'],
+    truncated: false
+  });
+
+  const stopRecordPromise = gateway.sendCommand('station', 'StopRecord');
+  const stopRecordSent = socket.sent.pop();
+  socket.receive({
+    type: 'COMMAND_ACK',
+    correlationId: stopRecordSent.correlationId,
+    result: { outputActive: false, outputPath: '/var/private/recording.mkv' }
+  });
+  assert.deepEqual(await stopRecordPromise, { outputActive: false });
+
+  const invalidSceneListPromise = gateway.sendCommand('station', 'GetSceneList');
+  const invalidSceneListSent = socket.sent.pop();
+  socket.receive({
+    type: 'COMMAND_ACK',
+    correlationId: invalidSceneListSent.correlationId,
+    result: { scenes: 'not-an-array' }
+  });
+  await assert.rejects(invalidSceneListPromise, { statusCode: 502, message: 'Invalid agent command result' });
+
   socket.bufferedAmount = 2 * 1024 * 1024;
   await assert.rejects(gateway.sendCommand('station', 'GetStats'), { statusCode: 503 });
   socket.bufferedAmount = 0;

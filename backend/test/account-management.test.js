@@ -71,12 +71,30 @@ test('account changes preserve scope, audit integrity and session revocation', {
   await send('/auth/sessions/' + sid(second), 200, { method: 'DELETE', token: first });
   await send('/auth/me', 401, { token: second });
 
-  for (const [path, method] of [
-    ['/stations/example/program/hls/playback-link', 'POST'], ['/stations/example/audio/mute', 'POST'],
-    ['/stations/example/playout', 'PUT'], ['/stations/example/program/ads', 'GET'],
-    ['/stations/example/graphics', 'GET']
+  for (const [path, method, body] of [
+    ['/stations/example', 'PATCH', {}],
+    ['/stations/example/program/local-scene/schedule', 'POST', {}],
+    ['/stations/example/playout', 'PUT', {}],
+    ['/stations/example/scenes/switch', 'POST', {}],
+    ['/stations/example/playout/control', 'POST', { action: 'emergency' }],
+    ['/stations/example/audio/mute', 'POST', {}],
+    ['/stations/example/program/local-scene', 'PUT', {}],
+    ['/stations/example/program/local-scene/video', 'POST'],
+    ['/stations/example/program/ads/assets/00000000-0000-0000-0000-000000000000', 'DELETE'],
+    ['/stations/example/program/ads', 'GET'],
+    ['/stations/example/graphics', 'GET'],
+    ['/stations/example/program/hls/playback-link', 'POST'],
+    ['/logs', 'GET'],
+    ['/users', 'GET']
   ]) {
-    const response = await fetch(root + '/api/v1' + path, { method, headers: { Authorization: 'Bearer ' + first } });
+    const response = await fetch(root + '/api/v1' + path, {
+      method,
+      headers: {
+        Authorization: 'Bearer ' + first,
+        ...(body ? { 'Content-Type': 'application/json' } : {})
+      },
+      body: body ? JSON.stringify(body) : undefined
+    });
     assert.equal(response.status, 403, method + ' ' + path);
     await response.arrayBuffer();
   }
@@ -112,6 +130,16 @@ test('account changes preserve scope, audit integrity and session revocation', {
   await disconnected;
   await send('/auth/me', 401, { token: first });
   await login('viewer', 401);
+  assert.deepEqual(db.prepare(`
+    SELECT action, details FROM audit_logs WHERE resourceId = 'viewer' AND action = 'LOGIN_FAILED' ORDER BY rowid DESC LIMIT 1
+  `).get() && {
+    ...db.prepare(`
+      SELECT action, details FROM audit_logs WHERE resourceId = 'viewer' AND action = 'LOGIN_FAILED' ORDER BY rowid DESC LIMIT 1
+    `).get()
+  }, {
+    action: 'LOGIN_FAILED',
+    details: JSON.stringify({ reason: 'Account inactive' })
+  });
   await status('viewer', admin, true, 200);
   await send('/auth/me', 401, { token: first });
 

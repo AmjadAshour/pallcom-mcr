@@ -75,17 +75,23 @@ apiRouter.get('/users', authenticate, authorize('user:manage'), async (req, res,
     next(error);
   }
 });
-apiRouter.post('/users', authenticate, authorize('user:manage'), validateBody(z.object({
-  fullName, email: z.string().email(),
-  password: newPassword, role: z.enum(managedAccountRoles)
+apiRouter.post('/users', authenticate, authorize('user:manage'), accountChangeLimiter, validateBody(z.object({
+  fullName, email: z.string().trim().max(254).email(),
+  password: newPassword, role: z.enum(managedAccountRoles),
+  currentPassword
 }).strict()), async (req, res, next) => {
   try {
-    const { password, ...values } = req.body;
+    const { password, currentPassword: suppliedCurrentPassword, ...values } = req.body;
     const repository = RepositoryFactory.getUserRepository();
+    const actorUser = await repository.findByEmail(req.user.email);
+    if (actorUser?.id !== req.user.id || !actorUser.isActive ||
+        !await CryptoService.verifyPassword(actorUser.passwordHash, suppliedCurrentPassword)) {
+      throw Object.assign(new Error('Current password is incorrect.'), { status: 403 });
+    }
     if (await repository.findByEmail(values.email)) return res.status(409).json({ success: false, error: 'Email is already registered' });
     const passwordHash = await CryptoService.hashPassword(password);
     await repository.create({ ...values, passwordHash, organizationId: req.user.organizationId }, {
-      actor: { id: req.user.id, sessionId: req.user.sessionId, ipAddress: req.ip }
+      actor: { id: req.user.id, sessionId: req.user.sessionId, ipAddress: req.ip, passwordHash: actorUser.passwordHash }
     });
     res.status(201).json({ success: true });
   } catch (error) {
@@ -131,26 +137,26 @@ apiRouter.get('/stations/:id/snapshot', authenticate, authorize('station:read'),
 apiRouter.get('/stations/:id/preview-image', authenticate, authorize('station:read'),
   ObsController.stationCommand('GetSceneScreenshot', (req) => ({ preview: req.query.bus === 'preview' })));
 apiRouter.post('/stations/:id/scene-item', authenticate, authorize('station:control'),
-  validateBody(z.object({ sceneName: z.string().min(1), sceneItemId: z.number().int(), enabled: z.boolean() })),
+  validateBody(z.object({ sceneName: z.string().min(1).max(250), sceneItemId: z.number().int(), enabled: z.boolean() }).strict()),
   ObsController.stationCommand('SetSceneItemEnabled', (req) => req.body));
 apiRouter.post('/stations/:id/studio-mode/t-bar', authenticate, authorize('station:control'),
-  validateBody(z.object({ position: z.number().min(0).max(1), release: z.boolean() })),
+  validateBody(z.object({ position: z.number().min(0).max(1), release: z.boolean() }).strict()),
   ObsController.stationCommand('SetTBarPosition', (req) => req.body));
 apiRouter.post('/stations/:id/studio-mode', authenticate, authorize('station:control'),
-  validateBody(z.object({ enabled: z.boolean() })),
+  validateBody(z.object({ enabled: z.boolean() }).strict()),
   ObsController.stationCommand('SetStudioModeEnabled', (req) => req.body));
 apiRouter.post('/stations/:id/transition-type', authenticate, authorize('station:control'),
-  validateBody(z.object({ transitionName: z.string().min(1).max(250) })),
+  validateBody(z.object({ transitionName: z.string().min(1).max(250) }).strict()),
   ObsController.stationCommand('SetCurrentSceneTransition', (req) => req.body));
 apiRouter.post('/stations/:id/transition-duration', authenticate, authorize('station:control'),
-  validateBody(z.object({ transitionDuration: z.number().int().min(50).max(20000) })),
+  validateBody(z.object({ transitionDuration: z.number().int().min(50).max(20000) }).strict()),
   ObsController.stationCommand('SetCurrentSceneTransitionDuration', (req) => req.body));
 apiRouter.post('/stations/:id/text-input', authenticate, authorize('station:control'),
-  validateBody(z.object({ inputName: z.string().min(1).max(250), text: z.string().max(3000) })),
+  validateBody(z.object({ inputName: z.string().min(1).max(250), text: z.string().max(3000) }).strict()),
   ObsController.stationCommand('SetTextInput', (req) => req.body));
 apiRouter.post('/stations/:id/scenes/switch', authenticate, authorize('station:control'), validateBody(SceneSwitchSchema), ObsController.switchScene);
 apiRouter.post('/stations/:id/scenes/cut', authenticate, authorize('station:control'),
-  validateBody(z.object({ sceneName: z.string().min(1).max(250) })),
+  validateBody(z.object({ sceneName: z.string().min(1).max(250) }).strict()),
   ObsController.stationCommand('CutToScene', (req) => req.body));
 apiRouter.post('/stations/:id/stream/start', authenticate, authorize('station:control'), ObsController.startStream);
 apiRouter.post('/stations/:id/stream/stop', authenticate, authorize('station:control'), ObsController.stopStream);
@@ -180,10 +186,10 @@ apiRouter.get('/logs', authenticate, authorize('audit:read'), AuditController.li
 
 
 const automationSchema = z.object({
-  stationId: z.string().min(1), name: z.string().trim().min(1).max(100),
+  stationId: z.string().min(1).max(100), name: z.string().trim().min(1).max(100),
   action: z.enum(['scene', 'recordingStart', 'recordingStop']),
   sceneName: z.string().min(1).max(250).optional(), runAt: z.string().datetime().optional()
-}).refine((job) => job.action !== 'scene' || Boolean(job.sceneName), 'Choose a scene');
+}).strict().refine((job) => job.action !== 'scene' || Boolean(job.sceneName), 'Choose a scene');
 
 apiRouter.get('/automations', authenticate, authorize('station:control'), AutomationController.list);
 apiRouter.post('/automations', authenticate, authorize('station:control'), validateBody(automationSchema), AutomationController.create);

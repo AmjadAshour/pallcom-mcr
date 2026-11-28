@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import sharp from 'sharp';
 import { getSqliteDatabase } from '../../infrastructure/database/sqlite.js';
+import { insertAuditEvent } from '../../infrastructure/repositories/sqlite-audit-repository.js';
 import { RepositoryFactory } from '../../infrastructure/repositories/repository-factory.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import { authorize } from '../middlewares/rbac.middleware.js';
@@ -30,8 +31,8 @@ export function decodeImage(image) {
 const settingsSchema = z.object({
   content: z.string().trim().max(600),
   image: z.string().max(700000).refine((image) => !image || Boolean(decodeImage(image)), 'Use a PNG, JPEG, or WebP image up to 512 KB')
-});
-const timerSchema = z.object({ duration: z.number().int().min(0).max(86400) });
+}).strict();
+const timerSchema = z.object({ duration: z.number().int().min(0).max(86400) }).strict();
 
 async function validateImage(req, res, next) {
   if (!req.body.image) return next();
@@ -91,19 +92,49 @@ graphicsRouter.get(root, authenticate, authorize('graphics:manage'), stationHand
   });
 }));
 
+function writeTransaction(db, work) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const result = work();
+    db.exec('COMMIT');
+    return result;
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function recordGraphicsAudit(db, req, action, details = {}) {
+  insertAuditEvent(db, {
+    organizationId: req.user.organizationId,
+    userId: req.user.id,
+    action,
+    resourceType: 'Station',
+    resourceId: req.params.id,
+    details,
+    ipAddress: req.ip
+  });
+}
+
 graphicsRouter.post(root + '/rotate-link', authenticate, authorize('graphics:manage'), stationHandler((req, res, db) => {
   const token = randomBytes(32).toString('hex');
   const expiresAt = Date.now() + graphicsLinkLifetime;
-  db.prepare(`INSERT INTO station_graphics_tokens (stationId, token, expiresAt) VALUES (?, ?, ?)
-    ON CONFLICT(stationId) DO UPDATE SET token = excluded.token, expiresAt = excluded.expiresAt`)
-    .run(req.params.id, token, expiresAt);
+  writeTransaction(db, () => {
+    db.prepare(`INSERT INTO station_graphics_tokens (stationId, token, expiresAt) VALUES (?, ?, ?)
+      ON CONFLICT(stationId) DO UPDATE SET token = excluded.token, expiresAt = excluded.expiresAt`)
+      .run(req.params.id, token, expiresAt);
+    recordGraphicsAudit(db, req, 'GRAPHICS_LINK_ROTATED', { expiresAt });
+  });
   res.set('Cache-Control', 'no-store').json({ success: true, token, expiresAt });
 }));
 
 graphicsRouter.delete(root + '/link', authenticate, authorize('graphics:manage'), stationHandler((req, res, db) => {
-  db.prepare(`INSERT INTO station_graphics_tokens (stationId, token, expiresAt) VALUES (?, ?, 0)
-    ON CONFLICT(stationId) DO UPDATE SET token = excluded.token, expiresAt = 0`)
-    .run(req.params.id, randomBytes(32).toString('hex'));
+  writeTransaction(db, () => {
+    db.prepare(`INSERT INTO station_graphics_tokens (stationId, token, expiresAt) VALUES (?, ?, 0)
+      ON CONFLICT(stationId) DO UPDATE SET token = excluded.token, expiresAt = 0`)
+      .run(req.params.id, randomBytes(32).toString('hex'));
+    recordGraphicsAudit(db, req, 'GRAPHICS_LINK_REVOKED');
+  });
   res.set('Cache-Control', 'no-store').sendStatus(204);
 }));
 
@@ -115,30 +146,44 @@ graphicsRouter.put(root + '/:kind', authenticate, authorize('graphics:manage'), 
     return res.status(400).json({ success: false, error: 'Provide the required overlay content' });
   }
   const revision = image ? createHash('sha256').update(image).digest('hex') : '';
-  db.prepare(`INSERT INTO station_graphics (stationId, kind, content, image, imageRevision)
-    VALUES (?, ?, ?, ?, ?) ON CONFLICT(stationId, kind)
-    DO UPDATE SET content = excluded.content, image = excluded.image, imageRevision = excluded.imageRevision`)
-    .run(id, kind, content, image, revision);
+  writeTransaction(db, () => {
+    db.prepare(`INSERT INTO station_graphics (stationId, kind, content, image, imageRevision)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(stationId, kind)
+      DO UPDATE SET content = excluded.content, image = excluded.image, imageRevision = excluded.imageRevision`)
+      .run(id, kind, content, image, revision);
+    recordGraphicsAudit(db, req, 'GRAPHICS_OVERLAY_SAVED', { kind, hasImage: Boolean(image) });
+  });
   res.json({ success: true });
 }));
 
 graphicsRouter.post(root + '/:kind/publish', authenticate, authorize('graphics:manage'), validateBody(timerSchema), stationHandler((req, res, db) => {
   const { id, kind } = req.params;
   const expiresAt = req.body.duration ? Date.now() + req.body.duration * 1000 : null;
-  const result = db.prepare('UPDATE station_graphics SET published = 1, expiresAt = ? WHERE stationId = ? AND kind = ?')
-    .run(expiresAt, id, kind);
-  if (!result.changes) return res.status(404).json({ success: false, error: 'Save the overlay before publishing' });
+  const changed = writeTransaction(db, () => {
+    const result = db.prepare('UPDATE station_graphics SET published = 1, expiresAt = ? WHERE stationId = ? AND kind = ?')
+      .run(expiresAt, id, kind);
+    if (!result.changes) return false;
+    recordGraphicsAudit(db, req, 'GRAPHICS_OVERLAY_PUBLISHED', { kind, expiresAt });
+    return true;
+  });
+  if (!changed) return res.status(404).json({ success: false, error: 'Save the overlay before publishing' });
   res.json({ success: true, expiresAt });
 }));
 
 graphicsRouter.post(root + '/:kind/hide', authenticate, authorize('graphics:manage'), stationHandler((req, res, db) => {
-  db.prepare('UPDATE station_graphics SET published = 0, expiresAt = NULL WHERE stationId = ? AND kind = ?')
-    .run(req.params.id, req.params.kind);
+  writeTransaction(db, () => {
+    db.prepare('UPDATE station_graphics SET published = 0, expiresAt = NULL WHERE stationId = ? AND kind = ?')
+      .run(req.params.id, req.params.kind);
+    recordGraphicsAudit(db, req, 'GRAPHICS_OVERLAY_HIDDEN', { kind: req.params.kind });
+  });
   res.json({ success: true });
 }));
 
 graphicsRouter.delete(root + '/:kind', authenticate, authorize('graphics:manage'), stationHandler((req, res, db) => {
-  db.prepare('DELETE FROM station_graphics WHERE stationId = ? AND kind = ?').run(req.params.id, req.params.kind);
+  writeTransaction(db, () => {
+    db.prepare('DELETE FROM station_graphics WHERE stationId = ? AND kind = ?').run(req.params.id, req.params.kind);
+    recordGraphicsAudit(db, req, 'GRAPHICS_OVERLAY_DELETED', { kind: req.params.kind });
+  });
   res.json({ success: true });
 }));
 

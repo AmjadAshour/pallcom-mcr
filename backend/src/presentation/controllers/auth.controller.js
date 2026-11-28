@@ -51,7 +51,19 @@ export class AuthController {
       dummyPasswordHash ??= CryptoService.hashPassword(randomBytes(32).toString('hex'));
       const dummy = await dummyPasswordHash;
       const isValidPassword = await CryptoService.verifyPassword(user?.isActive ? user.passwordHash : dummy, password);
-      if (!user?.isActive) {
+      if (!user) {
+        return res.status(401).json({ success: false, error: 'Invalid email or password' });
+      }
+      if (!user.isActive) {
+        await auditRepo.create({
+          organizationId: user.organizationId || 'default-org',
+          userId: user.id,
+          action: 'LOGIN_FAILED',
+          resourceType: 'User',
+          resourceId: user.id,
+          details: { reason: 'Account inactive' },
+          ipAddress: req.ip
+        });
         return res.status(401).json({ success: false, error: 'Invalid email or password' });
       }
 

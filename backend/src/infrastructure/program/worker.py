@@ -234,11 +234,15 @@ def run_srt(destination):
         stop_srt(destination)
 audio_sample = 0
 scene_audio = None
+external_audio_pcm = deque(maxlen=16)
+external_audio_mode = "off"
 silence = bytes(3840)
 audio_lock = threading.Lock()
 
 
 def audio_routed(feed):
+    if external_audio_mode == "replace":
+        return False
     return feed.health == "ready" and (
         feed.audio_mode == "on" or (feed.audio_mode == "follow" and source == feed.name)
     )
@@ -272,12 +276,15 @@ def mix_audio(tracks):
 def feed_local_audio(appsrc, _length):
     global audio_sample
     with audio_lock:
-        active = scene_audio if source == "scene" else None
+        active = scene_audio if (source == "scene" and external_audio_mode != "replace") else None
         tracks = [(input_pcm(feed), feed.gain) for feed in inputs.values() if audio_routed(feed)]
+        ext_chunk = external_audio_pcm.popleft() if (external_audio_mode in ("replace", "mix") and external_audio_pcm) else None
     if active:
         pcm, start = active
         index = ((audio_sample - start) * 4) % len(pcm)
         tracks.append((pcm[index:index + len(silence)], 1))
+    if ext_chunk:
+        tracks.append((ext_chunk[:len(silence)].ljust(len(silence), b"\x00"), 1.0))
     buffer = Gst.Buffer.new_wrapped(mix_audio(tracks))
     buffer.pts = Gst.util_uint64_scale(audio_sample, Gst.SECOND, 48000)
     buffer.duration = 20 * Gst.MSECOND
@@ -523,6 +530,17 @@ def command(line):
             program_gain_db = packet["gainDb"]
             pipeline.get_by_name("program_volume").set_property("volume", 10 ** (program_gain_db / 20))
             report("applied")
+        elif "externalAudioFrame" in packet:
+            global external_audio_mode
+            with audio_lock:
+                external_audio_mode = packet.get("mode", "mix")
+                raw = base64.b64decode(packet["externalAudioFrame"]) if packet["externalAudioFrame"] else b""
+                if raw:
+                    for offset in range(0, len(raw), len(silence)):
+                        external_audio_pcm.append(raw[offset:offset + len(silence)].ljust(len(silence), b"\x00"))
+                elif external_audio_mode == "off":
+                    external_audio_pcm.clear()
+            return False
         elif "adLayers" in packet:
             apply_ads(packet)
             print('{"adsReceived":true}', flush=True)
