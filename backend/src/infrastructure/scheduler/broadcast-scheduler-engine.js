@@ -578,17 +578,14 @@ export class ChannelScheduleExecutor {
     try {
       const schedRepo = RepositoryFactory.getBroadcastSchedulerRepository();
       const playoutInst = multiChannelPlayout.getInstance(this.channelId, this.organizationId);
-      let execState = await schedRepo.getExecutionState(this.channelId, this.organizationId);
 
-      // Lease check: prevent duplicate scheduler ownership across competing instances
-      if (
-        execState.leaseOwnerId &&
-        execState.leaseOwnerId !== this.instanceLeaseId &&
-        execState.leaseExpiresAt > nowMs
-      ) {
-        return execState;
+      // Atomic compare-and-set lease acquisition: prevent duplicate scheduler ownership across competing instances
+      const lease = await schedRepo.acquireSchedulerLease(this.channelId, this.organizationId, this.instanceLeaseId, nowMs, 5000);
+      if (!lease.acquired) {
+        return await schedRepo.getExecutionState(this.channelId, this.organizationId);
       }
 
+      let execState = await schedRepo.getExecutionState(this.channelId, this.organizationId);
       const nowIso = new Date(nowMs).toISOString();
 
       // Check if a manual override has expired
@@ -597,7 +594,7 @@ export class ChannelScheduleExecutor {
           manualOverrideActive: false,
           overrideSourceId: null,
           overrideExpiresAtUtc: null
-        });
+        }, { ownerId: this.instanceLeaseId });
       }
 
       // Check if a pending future schedule revision is now due for activation
@@ -620,7 +617,7 @@ export class ChannelScheduleExecutor {
               pendingRevisionId: null,
               pendingActivationPolicy: null,
               pendingEffectiveAtUtc: null
-            });
+            }, { ownerId: this.instanceLeaseId });
           }
         }
       }
@@ -634,7 +631,7 @@ export class ChannelScheduleExecutor {
           leaseOwnerId: this.instanceLeaseId,
           leaseExpiresAt: nowMs + 5000,
           lastHeartbeatAt: nowIso
-        });
+        }, { ownerId: this.instanceLeaseId });
       }
 
       if (execState.activeRevisionId !== activeRevision.id && !execState.pendingRevisionId) {
@@ -642,16 +639,16 @@ export class ChannelScheduleExecutor {
           activeRevisionId: activeRevision.id,
           activeRevisionNumber: activeRevision.revisionNumber,
           timezone: activeRevision.timezone || 'UTC'
-        });
+        }, { ownerId: this.instanceLeaseId });
       }
 
-      // If Emergency Override or Hold is active, do not start new scheduled events
+      // If Emergency Override or Hold or Manual Override is active, do not start new scheduled events
       if (execState.emergencyOverrideActive || execState.holdActive || execState.manualOverrideActive) {
         return await schedRepo.updateExecutionState(this.channelId, this.organizationId, {
           leaseOwnerId: this.instanceLeaseId,
           leaseExpiresAt: nowMs + 5000,
           lastHeartbeatAt: nowIso
-        });
+        }, { ownerId: this.instanceLeaseId });
       }
 
       // Expand occurrences in a bounded window around `nowMs` ([-4 hours, +12 hours])
@@ -674,7 +671,8 @@ export class ChannelScheduleExecutor {
             actualEndUtc: nowIso,
             actualDurationMs: Math.max(0, nowMs - activeTrack.actualStartMs),
             status: 'COMPLETED',
-            workerConfirmed: true
+            workerConfirmed: true,
+            details: { endErrorMs: nowMs - activeTrack.plannedEndMs }
           });
           delete trackStates[trackType];
 
@@ -748,30 +746,8 @@ export class ChannelScheduleExecutor {
           }
         }
 
-        // If an ADVERTISEMENTS event starts while a MAIN_VIDEO movie is playing, save the movie's resume offset!
-        if (occ.trackType === 'ADVERTISEMENTS' && trackStates.MAIN_VIDEO) {
-          const activeMain = trackStates.MAIN_VIDEO;
-          const elapsedMovieMs = Math.max(0, nowMs - activeMain.actualStartMs) + Number(activeMain.resumeOffsetMs || 0);
-          interruptedProgram = {
-            ...activeMain,
-            resumeOffsetMs: elapsedMovieMs,
-            interruptedAtMs: nowMs
-          };
-          await schedRepo.updateAsRunRecord(activeMain.asRunId, this.organizationId, {
-            status: 'INTERRUPTED_BY_AD',
-            interruptionReason: `Paused at +${elapsedMovieMs}ms for advertisement "${occ.title}"`,
-            details: { pausedAtOffsetMs: elapsedMovieMs }
-          });
-        }
-
-        // Execute occurrence on the actual channel playout engine / audio mixer / graphics layer
-        const execOutcome = await this._dispatchOccurrenceToEngine(
-          occ, activeRevision, playoutInst,
-          occ.trackType === 'ADVERTISEMENTS' ? Number(interruptedProgram?.resumeOffsetMs || 0) : 0
-        );
-        claimedSet.add(occ.occurrenceId);
-
-        const asRun = await schedRepo.createAsRunRecord({
+        // Durable write-ahead claim in database BEFORE dispatching to engine
+        const claim = await schedRepo.claimOccurrence({
           organizationId: this.organizationId,
           channelId: this.channelId,
           revisionId: activeRevision.id,
@@ -789,11 +765,65 @@ export class ChannelScheduleExecutor {
           actualStartUtc: nowIso,
           plannedEndUtc: occ.plannedEndUtc,
           plannedDurationMs: occ.plannedEndMs - occ.plannedStartMs,
+          resumeOffsetMs: 0,
+          details: { startErrorMs: nowMs - occ.plannedStartMs }
+        }, { ownerId: this.instanceLeaseId });
+
+        if (claim.ownerLost) {
+          return await schedRepo.getExecutionState(this.channelId, this.organizationId);
+        }
+        claimedSet.add(occ.occurrenceId);
+        if (!claim.claimed) {
+          // Already durably claimed by an earlier process/instance before crash
+          continue;
+        }
+
+        // If an ADVERTISEMENTS event starts while a MAIN_VIDEO movie is playing, save the movie's resume offset!
+        if (occ.trackType === 'ADVERTISEMENTS' && trackStates.MAIN_VIDEO) {
+          const activeMain = trackStates.MAIN_VIDEO;
+          const elapsedMovieMs = Math.max(0, nowMs - activeMain.actualStartMs) + Number(activeMain.resumeOffsetMs || 0);
+          interruptedProgram = {
+            ...activeMain,
+            resumeOffsetMs: elapsedMovieMs,
+            interruptedAtMs: nowMs
+          };
+          await schedRepo.updateAsRunRecord(activeMain.asRunId, this.organizationId, {
+            status: 'INTERRUPTED_BY_AD',
+            interruptionReason: `Paused at +${elapsedMovieMs}ms for advertisement "${occ.title}"`,
+            details: { pausedAtOffsetMs: elapsedMovieMs }
+          });
+        }
+
+        // If a primary HARD_START event starts while an advertisement break is active, cancel the interrupted movie resume
+        if ((occ.trackType === 'MAIN_VIDEO' || occ.trackType === 'LIVE_CAMERA_ROTATION') && occ.executionMode === 'HARD_START') {
+          if (interruptedProgram?.occurrenceId && interruptedProgram.occurrenceId !== occ.occurrenceId) {
+            interruptedProgram = {};
+          }
+          if (trackStates.ADVERTISEMENTS) {
+            await schedRepo.updateAsRunRecord(trackStates.ADVERTISEMENTS.asRunId, this.organizationId, {
+              actualEndUtc: nowIso,
+              actualDurationMs: Math.max(0, nowMs - trackStates.ADVERTISEMENTS.actualStartMs),
+              status: 'PREEMPTED',
+              interruptionReason: `Preempted by primary HARD_START "${occ.title}"`,
+              workerConfirmed: true
+            });
+            delete trackStates.ADVERTISEMENTS;
+          }
+        }
+
+        // Execute occurrence on the actual channel playout engine / audio mixer / graphics layer
+        const dispatchT0 = performance.now();
+        const execOutcome = await this._dispatchOccurrenceToEngine(
+          occ, activeRevision, playoutInst,
+          occ.trackType === 'ADVERTISEMENTS' ? Number(interruptedProgram?.resumeOffsetMs || 0) : 0
+        );
+        const commandLatencyMs = Math.round((performance.now() - dispatchT0) * 100) / 100;
+
+        const asRun = await schedRepo.updateAsRunRecord(claim.record.id, this.organizationId, {
           status: execOutcome.ok ? 'RUNNING' : 'FAILED_TO_START',
           interruptionReason: execOutcome.error || null,
-          resumeOffsetMs: 0,
           workerConfirmed: execOutcome.workerConfirmed,
-          details: { startErrorMs: nowMs - occ.plannedStartMs, ...execOutcome.details }
+          details: { startErrorMs: nowMs - occ.plannedStartMs, commandLatencyMs, ...execOutcome.details }
         });
 
         if (execOutcome.ok) {
@@ -815,6 +845,10 @@ export class ChannelScheduleExecutor {
           if (occ.trackType === 'MAIN_VIDEO' || occ.trackType === 'LIVE_CAMERA_ROTATION') {
             gapFallbackActive = false;
           }
+        } else if ((occ.trackType === 'MAIN_VIDEO' || occ.trackType === 'LIVE_CAMERA_ROTATION') && !gapFallbackActive) {
+          // Unavailable or failed primary source -> immediately activate schedule gap fallback
+          await this._activateScheduleGapFallback(activeRevision, playoutInst, schedRepo, nowMs);
+          gapFallbackActive = true;
         }
       }
 
@@ -837,7 +871,7 @@ export class ChannelScheduleExecutor {
         leaseOwnerId: this.instanceLeaseId,
         leaseExpiresAt: nowMs + 5000,
         lastHeartbeatAt: nowIso
-      });
+      }, { ownerId: this.instanceLeaseId });
     } finally {
       this.stepping = false;
     }
@@ -1003,7 +1037,21 @@ export class ChannelScheduleExecutor {
       }
 
       if (occ.trackType === 'INDEPENDENT_AUDIO') {
+        const audioEngine = multiChannelAudio.getEngine(this.channelId, this.organizationId);
         if (occ.audioSourceId) {
+          const exclusiveDeck = occ.metadata?.exclusiveDeck !== false;
+          if (exclusiveDeck) {
+            const allSources = await audioRepo.listAudioSources(this.organizationId, { channelId: this.channelId });
+            const previousActive = allSources.find(s => s.id !== occ.audioSourceId && s.enabled && !s.muted);
+            for (const s of allSources) {
+              if (s.id !== occ.audioSourceId && s.enabled && ['UPLOADED_AUDIO', 'MUSIC_PLAYLIST', 'INTERNET_RADIO', 'ICECAST_STREAM', 'SHOUTCAST_STREAM'].includes(s.sourceType)) {
+                await audioRepo.updateAudioSource(s.id, this.organizationId, { enabled: false });
+              }
+            }
+            if (previousActive && Number(occ.metadata?.crossfadeDurationMs || 0) > 0) {
+              audioEngine.startCrossfade(previousActive.id, occ.audioSourceId, Number(occ.metadata.crossfadeDurationMs));
+            }
+          }
           const updates = {
             enabled: occ.metadata?.enabled !== undefined ? Boolean(occ.metadata.enabled) : true,
             ...(occ.metadata?.volumeLinear !== undefined ? { volumeLinear: Number(occ.metadata.volumeLinear) } : {}),
@@ -1019,7 +1067,7 @@ export class ChannelScheduleExecutor {
           });
         }
         // Step one PCM mix frame so meters update immediately without restarting video encoder
-        await multiChannelAudio.getEngine(this.channelId, this.organizationId).stepFrame({ persistMeters: true });
+        await audioEngine.stepFrame({ persistMeters: true });
         return { ok: true, workerConfirmed: true, details: { dispatched: 'INDEPENDENT_AUDIO' } };
       }
 

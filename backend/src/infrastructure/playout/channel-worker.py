@@ -114,6 +114,7 @@ active_media_asset_id = None
 last_transition_ms = 0.0
 
 external_audio_pcm = deque(maxlen=32)
+last_external_audio_frame = None
 external_audio_mode = initial.get("externalAudioMode", "mix")  # "replace", "mix", "off"
 file_audio_pcm = deque(maxlen=24)
 live_inputs = {
@@ -182,7 +183,7 @@ def mix_pcm_tracks(tracks):
 
 
 def feed_local_audio(appsrc, _length):
-    global audio_sample_counter
+    global audio_sample_counter, last_external_audio_frame
     tracks = []
     with audio_lock:
         if external_audio_mode != "replace":
@@ -192,9 +193,13 @@ def feed_local_audio(appsrc, _length):
                 feed = live_inputs[active_pad_name]
                 if feed.audio_enabled and feed.pcm:
                     tracks.append((pop_pcm_frame(feed.pcm, feed), 1.0))
-        if external_audio_mode in ("replace", "mix") and external_audio_pcm:
-            ext = external_audio_pcm.popleft()
-            tracks.append((ext[:len(silence_frame)].ljust(len(silence_frame), b"\x00"), 1.0))
+        if external_audio_mode in ("replace", "mix"):
+            if external_audio_pcm:
+                ext = external_audio_pcm.popleft()
+                last_external_audio_frame = ext[:len(silence_frame)].ljust(len(silence_frame), b"\x00")
+                tracks.append((last_external_audio_frame, 1.0))
+            elif last_external_audio_frame is not None:
+                tracks.append((last_external_audio_frame, 1.0))
 
     mixed = mix_pcm_tracks(tracks)
     buf = Gst.Buffer.new_wrapped(mixed)
@@ -496,17 +501,19 @@ def handle_command(line):
         emit_status(reply="file_seeked", request_id=packet.get("requestId"))
 
     elif cmd == "external_audio":
+        global last_external_audio_frame
         with audio_lock:
             external_audio_mode = packet.get("mode", external_audio_mode)
             b64 = packet.get("pcmBase64", "")
             if b64:
                 pcm_bytes = base64.b64decode(b64)
                 for offset in range(0, len(pcm_bytes), len(silence_frame)):
-                    external_audio_pcm.append(
-                        pcm_bytes[offset:offset + len(silence_frame)].ljust(len(silence_frame), b"\x00")
-                    )
+                    frame = pcm_bytes[offset:offset + len(silence_frame)].ljust(len(silence_frame), b"\x00")
+                    external_audio_pcm.append(frame)
+                    last_external_audio_frame = frame
             elif external_audio_mode == "off":
                 external_audio_pcm.clear()
+                last_external_audio_frame = None
 
     elif cmd == "watermark":
         apply_overlay_png(

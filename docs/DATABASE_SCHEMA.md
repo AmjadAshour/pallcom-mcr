@@ -1,4 +1,4 @@
-# Database schema
+﻿# Database schema
 
 The active schema is defined in [sqlite.js](../backend/src/infrastructure/database/sqlite.js). Operational domains include organizations, users and auth sessions; studios/stations and pairing; station graphics, automations, playout and as-run records; audit logs. FFT/media binaries and videos stay outside the database. The new Agent connection heartbeat and telemetry freshness are in memory and reset at reconnect. See [deployment](DEPLOYMENT.md) for data backup requirements.
 
@@ -13,7 +13,7 @@ Phase Three adds four relational tables in [sqlite.js](../backend/src/infrastruc
 - `media_processing_jobs` (`MediaProcessingJob`): durable asynchronous FFprobe/FFmpeg inspection jobs linked to `media_assets` with cascade deletion.
 - `media_playlists` (`MediaPlaylist`): organization-scoped `VIDEO` and `AUDIO` playlists referencing validated `READY` media assets for movie-channel and independent-audio scheduling.
 
-Legacy short-clip tables (`ad_assets`, `ad_frames`, `ad_asset_audio`) remain in SQLite for backward compatibility with existing Phase 1–2 native scene and advertising receiver fixtures until Phase 15 migrates runtime persistence to MySQL.
+Legacy short-clip tables (`ad_assets`, `ad_frames`, `ad_asset_audio`) remain in SQLite for backward compatibility with existing Phase 1â€“2 native scene and advertising receiver fixtures until Phase 15 migrates runtime persistence to MySQL.
 
 ## Phase 15 MySQL persistence foundation and Phase Four video sources schema
 
@@ -32,9 +32,14 @@ Legacy short-clip tables (`ad_assets`, `ad_frames`, `ad_asset_audio`) remain in 
 - `channel_playout_configs` (`ChannelPlayoutConfig` in [schema.prisma](../backend/database/prisma/schema.prisma) and [sqlite.js](../backend/src/infrastructure/database/sqlite.js)): composite primary key `(channelId, organizationId)` storing `playoutMode` (`CAMERA_ROTATION`, `MOVIE_PLAYOUT`, `HYBRID_PLAYOUT`), `desiredState` (`STOPPED`, `RUNNING`), `runtimeState` (`STOPPED`, `STARTING`, `RUNNING`, `DEGRADED`, `RECOVERING`, `FALLBACK_ACTIVE`, `STOPPING`, `FAILED`), `autoStart`, encoding profile (`width`, `height`, `frameRate`, `videoCodec`, `videoBitrateKbps`, `gopFrames`, `audioCodec`, `audioSampleRateHz`, `audioChannels`, `audioBitrateKbps`, `hwAccelMode`, `activeEncoder`), camera rotation state (`cameraSequence`, `cameraRepeat`, `activeCameraIndex`, `currentSourceId`), continuous movie state (`movieQueue`, `movieRepeat`, `activeMovieIndex`, `currentMediaAssetId`, `playbackPositionMs`, `remainingDurationMs`, `paused`), advertisement and graphics state (`adSchedulePolicy`, `adState`, `graphicsConfig`), fallback and emergency state (`fallbackConfig`, `fallbackActive`, `emergencyActive`, `emergencySourceId`), authorized camera VPN destinations (`networkAllowlist`), output targets (`outputUdpPort`, `outputHlsEnabled`, `outputSrtUrl`), worker supervision checkpoints (`workerSessionId`, `workerPid`, `restartCount`, `lastHeartbeatAt`, `lastOutputAt`, `lastRecoveryAt`, `lastError`), and optimistic concurrency `revision`.
 - Version-controlled SQL migration: [20261128_0002_phase06_channel_playout_engine/migration.sql](../backend/database/prisma/migrations/20261128_0002_phase06_channel_playout_engine/migration.sql).
 
+## Phase Seven — Broadcast Scheduler Database Schema (Migration `20261128_0003_phase07_broadcast_scheduler`)
 
-## Phase Seven - Broadcast Scheduler (2026-11-28)
-Implemented and verified locally (SQLite, local MariaDB 10.4.32 only; Oracle MySQL 8.4 gate G48 remains open). Evidence: `backend/test/broadcast-scheduler.test.js` (5 tests: DST, recurrence, validation, RBAC/draft/publish/concurrency/delete-protection, simulated 72-hour schedule), `backend/verification/two-channel-scheduler-acceptance.js` (two real 1920x1080@25 GStreamer channels, FFprobe/FFmpeg receivers, mid-movie ad resume at 5899 ms, camera failure/recovery, manual override, draft isolation, cross-channel isolation), `backend/verification/mysql-migration-rehearsal.js` (scheduler tables parity), full workspace suite 52/52 passing, frontend build passing.
-Not claimed: a real 72-hour wall-clock endurance run (open production gate); the 72-hour test is validation plus a deterministic clock simulation. Manual override currently sets state flags and pauses scheduled starts; it does not switch the live source itself. Production security gates remain open. Phase Eight not started.
-
-Tables: channel_schedule_revisions, channel_scheduler_execution_states, channel_as_run_logs (migration 20261128_0003_phase07_broadcast_scheduler).
+1. **`channel_schedule_revisions` / `ChannelScheduleRevision`**:
+   - Primary Key: `id` (`UUID`). Unique Constraint: `(organizationId, channelId, revisionNumber)`. Index: `(organizationId, channelId, lifecycleState, revisionNumber DESC)`.
+   - Stores `name`, `timezone`, `lifecycleState` (`DRAFT` | `VALIDATED` | `PUBLISHED` | `SUPERSEDED` | `ARCHIVED`), `activationPolicy`, `effectiveFromUtc`, `gapPolicy`, `gapFallbackAssetId`, `gapFallbackSourceId`, `gapFallbackPlaylistId`, JSON `events`, JSON `templates`, JSON `validationSummary`, `publishedByUserId`, `publishedAt`, `createdByUserId`.
+2. **`channel_scheduler_execution_states` / `ChannelSchedulerExecutionState`**:
+   - Composite Primary Key: `(channelId, organizationId)`.
+   - Stores `activeRevisionId`, `activeRevisionNumber`, `pendingRevisionId`, `pendingActivationPolicy`, `pendingEffectiveAtUtc`, `timezone`, `schedulerRunning`, `holdActive`, `emergencyOverrideActive`, `manualOverrideActive`, `overrideSourceId`, `overrideExpiresAtUtc`, JSON `currentTrackStates`, JSON `claimedOccurrenceIds`, JSON `interruptedProgramState`, `gapFallbackActive`, `leaseOwnerId`, `leaseExpiresAt` (`BIGINT`), `lastHeartbeatAt`, `lastReconciledAt`.
+3. **`channel_as_run_logs` / `ChannelAsRunLog`**:
+   - Primary Key: `id` (`UUID`). Unique Constraint: `occurrenceId` (enforces write-ahead claim idempotency). Index: `(organizationId, channelId, actualStartUtc DESC)`.
+   - Stores planned vs actual timestamps/durations, `status`, `interruptionReason`, `resumeOffsetMs`, `workerConfirmed`, and JSON `details`.

@@ -1,4 +1,4 @@
-# Phase Zero test report
+﻿# Phase Zero test report
 
 ## Scope
 
@@ -363,7 +363,7 @@ All commands below executed on isolated SQLite and temporary filesystem storage 
 
 ### Phase Three verification boundaries
 
-- **Maximum tested individual upload size**: `1,081,190,040` bytes (**1.05 GiB / 1,031.1 MiB**) end-to-end streamed in 64 MiB chunks with full SHA-256 verification and FFprobe/FFmpeg validation. Configurable up to `102,400` MiB (default `20,480` MiB / 20 GiB). Multi-10-GB endurance soak on a dedicated 500 GB–1 TB Linux volume remains a staging acceptance requirement (`BROADCAST_ACCEPTANCE_PLAN.md`).
+- **Maximum tested individual upload size**: `1,081,190,040` bytes (**1.05 GiB / 1,031.1 MiB**) end-to-end streamed in 64 MiB chunks with full SHA-256 verification and FFprobe/FFmpeg validation. Configurable up to `102,400` MiB (default `20,480` MiB / 20 GiB). Multi-10-GB endurance soak on a dedicated 500 GBâ€“1 TB Linux volume remains a staging acceptance requirement (`BROADCAST_ACCEPTANCE_PLAN.md`).
 - **Maximum tested media duration**: **180.0 seconds (3 minutes)** at Full HD `1920x1080` H.264/AAC in the automated verification fixture; configurable up to `259,200` seconds / 72 hours (default `28,800` seconds / 8 hours). Full-length multi-hour movie playback soak remains part of the Phase 06/16/19 broadcast endurance gates.
 
 ## Phase 15 MySQL persistence foundation and Phase Four video source verification
@@ -410,7 +410,37 @@ On Windows (Node 24.15.0), the following checks exited 0 after adding station or
 - `node backend/verification/phase-one-local-staging.js` (with local OpenSSL and headless Chrome) exited 0, verifying loopback TLS, proxy IP attribution, foreign-origin rejection, secure cookies, Chromium CSP and WSS authentication, and real Agent CLI pairing, WSS scene query and revocation against the simulated OBS endpoint.
 - `node backend/verification/scene-upload-loopback.js`, `node backend/verification/program-audio-monitor-loopback.js`, `node backend/verification/hls-loopback.js`, `node backend/verification/program-input-proxy.js`, and `node backend/verification/ads-loopback.js` each exited 0 on isolated SQLite and loopback media fixtures (including HTTPS CONNECT proxy rejection holding slate with URL query redaction, and 329 decoded frames with a 90-frame ad cycle).
 
+## Phase Seven — Broadcast Scheduler Remediation & Acceptance Test Report (2026-11-28)
 
-## Phase Seven - Broadcast Scheduler (2026-11-28)
-Implemented and verified locally (SQLite, local MariaDB 10.4.32 only; Oracle MySQL 8.4 gate G48 remains open). Evidence: `backend/test/broadcast-scheduler.test.js` (5 tests: DST, recurrence, validation, RBAC/draft/publish/concurrency/delete-protection, simulated 72-hour schedule), `backend/verification/two-channel-scheduler-acceptance.js` (two real 1920x1080@25 GStreamer channels, FFprobe/FFmpeg receivers, mid-movie ad resume at 5899 ms, camera failure/recovery, manual override, draft isolation, cross-channel isolation), `backend/verification/mysql-migration-rehearsal.js` (scheduler tables parity), full workspace suite 52/52 passing, frontend build passing.
-Not claimed: a real 72-hour wall-clock endurance run (open production gate); the 72-hour test is validation plus a deterministic clock simulation. Manual override currently sets state flags and pauses scheduled starts; it does not switch the live source itself. Production security gates remain open. Phase Eight not started.
+### 1. Executed Verification Commands & Exit Codes
+
+1. **Frontend Production Build:**
+   - Command: `node node_modules/vite/bin/vite.js build frontend`
+   - Exit Code: `0` (`SchedulerPage` bundle built cleanly).
+2. **Phase Seven Unit, DST, 6 Execution Modes, Lease Fencing & 72-Hour Simulation Suite:**
+   - Command: `node --test backend/test/broadcast-scheduler.test.js`
+   - Exit Code: `0` (`7/7` tests passing, `0` failed, `0` skipped).
+3. **Real Headless Chromium Timeline UI Verification:**
+   - Command: `node backend/verification/scheduler-browser-loopback.js`
+   - Exit Code: `0` (verified all 7 tracks, live playhead, Add Event modal, duration resize, duplication, undo/redo, week view grid, validation, and schedule publication in headless Chrome).
+4. **SQLite-to-MariaDB/MySQL Migration & Prisma Repository Parity Rehearsal:**
+   - Command: `node backend/verification/mysql-migration-rehearsal.js`
+   - Exit Code: `0` (verified `ChannelScheduleRevision`, `ChannelSchedulerExecutionState`, `ChannelAsRunLog`, and `SCHEDULED_PLAYBACK` deletion protection on local `10.4.32-MariaDB`).
+5. **Mandatory Two-Channel Simultaneous Full HD (`1920x1080 @ 25fps`) Broadcast Scheduler Acceptance Test:**
+   - Command: `$env:MCR_PROGRAM_PYTHON = "D:/Projects/pallcom-mcr/pallcom-mcr/node_modules/.cache/pallcom-media/venv/Scripts/python.exe"; node backend/verification/two-channel-scheduler-acceptance.js`
+   - Exit Code: `0`.
+
+### 2. Measured Numerical Scheduling & Broadcast Accuracy Metrics
+
+| Metric | Sample Count ($N$) | Min | Median | p95 | Max |
+|---|---|---|---|---|---|
+| Scheduled Event Start Error (`|actualStartMs - plannedStartMs|`) | `11` | `7 ms` | `201 ms` | `264 ms` | `264 ms` |
+| Scheduled Event End Error (`|actualEndMs - plannedEndMs|`) | `4` | `4 ms` | `109 ms` | `109 ms` | `109 ms` |
+| Advertisement Start Error | `2` | `7 ms` | `172 ms` | `172 ms` | `172 ms` |
+| Advertisement End Error | `2` | `4 ms` | `84 ms` | `84 ms` | `84 ms` |
+| Scheduler Engine Command Dispatch Latency | `11` | `0.03 ms` | `22.67 ms` | `211.82 ms` | `211.82 ms` |
+| Mid-Movie Ad Resume Position Error (`expected=5408ms`, `actual=5408ms`) | `1` | `0 ms` | `0 ms` | `0 ms` | `0 ms` |
+| Manual Source Override Viewer-Observed Video Transition Latency | `1` | `590 ms` | `590 ms` | `590 ms` | `590 ms` |
+| Emergency Override Viewer-Observed Video Transition Latency | `1` | `490 ms` | `490 ms` | `490 ms` | `490 ms` |
+| Decoded Audio Silent Gaps After Stream Start (Ch1 / Ch2) | Continuous | `0` | `0` | `0` | `0` |
+| Duplicate Event Executions Across Failover | `7` tests | `0` | `0` | `0` | `0` |

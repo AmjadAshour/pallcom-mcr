@@ -99,12 +99,14 @@ const overrideActionSchema = z.object({
     'RELEASE_HOLD',
     'TAKE_NEXT',
     'SKIP_CURRENT',
+    'MANUAL_TRIGGER_EVENT',
     'MANUAL_SOURCE_OVERRIDE',
     'RETURN_TO_SCHEDULE',
     'EMERGENCY_OVERRIDE',
     'CLEAR_EMERGENCY'
   ]),
   trackType: z.enum(SCHEDULE_TRACK_TYPES).optional().default('MAIN_VIDEO'),
+  eventId: z.string().trim().max(100).nullable().optional(),
   overrideSourceId: z.string().trim().max(100).nullable().optional(),
   overrideDurationMs: z.number().int().min(1000).max(86400000).optional()
 }).strict();
@@ -389,9 +391,14 @@ channelSchedulerRouter.post('/channels/:channelId/scheduler/control', authentica
   try {
     if (!await requireChannelOwnership(req, res)) return;
     const { channelId } = req.params;
-    const { action, trackType, overrideSourceId, overrideDurationMs } = req.body;
+    const { action, trackType, eventId, overrideSourceId, overrideDurationMs } = req.body;
     const schedRepo = RepositoryFactory.getBroadcastSchedulerRepository();
+    const playoutRepo = RepositoryFactory.getChannelPlayoutRepository();
+    const videoSourcesRepo = RepositoryFactory.getVideoSourceRepository();
+    const mediaRepo = RepositoryFactory.getMediaRepository();
     const executor = multiChannelScheduler.getExecutor(channelId, req.user.organizationId);
+    const { multiChannelPlayout } = await import('../../infrastructure/playout/channel-playout-supervisor.js');
+    const playoutInst = multiChannelPlayout.getInstance(channelId, req.user.organizationId);
     let execState = await schedRepo.getExecutionState(channelId, req.user.organizationId);
     const nowMs = Date.now();
     const nowIso = new Date(nowMs).toISOString();
@@ -432,32 +439,247 @@ channelSchedulerRouter.post('/channels/:channelId/scheduler/control', authentica
       if (action === 'TAKE_NEXT') {
         execState = await executor.step(nowMs);
       }
+    } else if (action === 'MANUAL_TRIGGER_EVENT') {
+      const activeRev = execState.activeRevisionId
+        ? await schedRepo.getRevisionById(execState.activeRevisionId, req.user.organizationId)
+        : await schedRepo.getActivePublishedRevision(channelId, req.user.organizationId);
+      const ev = activeRev?.events?.find(e => e.id === eventId);
+      if (!ev) {
+        return res.status(404).json({ success: false, error: 'Manual trigger event not found in active schedule' });
+      }
+      const durationMs = Number(ev.durationMs || 60000);
+      const occ = {
+        ...ev,
+        occurrenceId: `${ev.id}@manual-${nowMs}`,
+        plannedStartMs: nowMs,
+        plannedEndMs: nowMs + durationMs,
+        plannedStartUtc: nowIso,
+        plannedEndUtc: new Date(nowMs + durationMs).toISOString()
+      };
+      const outcome = await executor._dispatchOccurrenceToEngine(occ, activeRev, playoutInst, 0);
+      const asRun = await schedRepo.createAsRunRecord({
+        organizationId: req.user.organizationId,
+        channelId,
+        revisionId: activeRev.id,
+        revisionNumber: activeRev.revisionNumber,
+        eventId: ev.id,
+        occurrenceId: occ.occurrenceId,
+        trackType: ev.trackType,
+        executionMode: 'MANUAL_TRIGGER',
+        title: ev.title,
+        category: 'MANUAL_TRIGGER',
+        mediaAssetId: ev.mediaAssetId || null,
+        videoSourceId: ev.videoSourceId || null,
+        audioSourceId: ev.audioSourceId || null,
+        plannedStartUtc: nowIso,
+        actualStartUtc: nowIso,
+        plannedEndUtc: occ.plannedEndUtc,
+        plannedDurationMs: durationMs,
+        status: outcome.ok ? 'RUNNING' : 'FAILED_TO_START',
+        workerConfirmed: outcome.workerConfirmed,
+        details: { manualTriggerBy: req.user.id, ...outcome.details }
+      });
+      const trackStates = { ...(execState.currentTrackStates || {}) };
+      if (outcome.ok) {
+        trackStates[ev.trackType] = {
+          eventId: ev.id,
+          occurrenceId: occ.occurrenceId,
+          asRunId: asRun.id,
+          title: ev.title,
+          trackType: ev.trackType,
+          executionMode: 'MANUAL_TRIGGER',
+          mediaAssetId: ev.mediaAssetId || null,
+          videoSourceId: ev.videoSourceId || null,
+          audioSourceId: ev.audioSourceId || null,
+          plannedStartMs: nowMs,
+          plannedEndMs: nowMs + durationMs,
+          actualStartMs: nowMs,
+          resumeOffsetMs: 0
+        };
+      }
+      execState = await schedRepo.updateExecutionState(channelId, req.user.organizationId, {
+        currentTrackStates: trackStates
+      });
     } else if (action === 'MANUAL_SOURCE_OVERRIDE') {
+      if (!overrideSourceId) {
+        return res.status(400).json({ success: false, error: 'overrideSourceId is required for MANUAL_SOURCE_OVERRIDE' });
+      }
+      // Validate ownership and channel scope of overrideSourceId
+      const cfg = await playoutRepo.getChannelConfig(channelId, req.user.organizationId);
+      const inCameraSeq = (cfg.cameraSequence || []).some(c => c && (c.sourceId === overrideSourceId || c.id === overrideSourceId));
+      const vSrc = !inCameraSeq ? await videoSourcesRepo.findSourceById(overrideSourceId, req.user.organizationId) : null;
+      if (vSrc && vSrc.stationId && vSrc.stationId !== channelId) {
+        return res.status(403).json({ success: false, error: 'Video source belongs to another channel' });
+      }
+      const mAsset = (!inCameraSeq && !vSrc) ? await mediaRepo.findAssetById(overrideSourceId, req.user.organizationId) : null;
+      if (!inCameraSeq && !vSrc && !mAsset) {
+        return res.status(404).json({ success: false, error: 'Override source or media asset not found in organization' });
+      }
+
+      const { outcome } = await playoutInst.triggerManualSourceOverride(
+        { sourceId: overrideSourceId },
+        { id: req.user.id, ipAddress: req.ip }
+      );
       const expiresUtc = overrideDurationMs ? new Date(nowMs + overrideDurationMs).toISOString() : null;
+      const asRun = await schedRepo.createAsRunRecord({
+        organizationId: req.user.organizationId,
+        channelId,
+        revisionId: execState.activeRevisionId || null,
+        revisionNumber: execState.activeRevisionNumber || 0,
+        eventId: `manual-override:${overrideSourceId}`,
+        occurrenceId: `manual-override:${overrideSourceId}@${nowMs}`,
+        trackType,
+        executionMode: 'MANUAL_TRIGGER',
+        title: `Manual Source Override (${vSrc?.name || mAsset?.title || overrideSourceId})`,
+        category: 'MANUAL_OVERRIDE',
+        mediaAssetId: mAsset?.id || vSrc?.mediaAssetId || null,
+        videoSourceId: vSrc?.id || null,
+        plannedStartUtc: nowIso,
+        actualStartUtc: nowIso,
+        plannedEndUtc: expiresUtc || new Date(nowMs + 3600000).toISOString(),
+        plannedDurationMs: overrideDurationMs || 3600000,
+        status: outcome.fallbackActivated ? 'FALLBACK_ACTIVE' : 'MANUAL_OVERRIDE',
+        interruptionReason: outcome.reason || null,
+        workerConfirmed: outcome.workerConfirmed,
+        details: { overrideSourceId, ...outcome }
+      });
+
       execState = await schedRepo.updateExecutionState(channelId, req.user.organizationId, {
         manualOverrideActive: true,
-        overrideSourceId: overrideSourceId || null,
-        overrideExpiresAtUtc: expiresUtc
+        overrideSourceId,
+        overrideExpiresAtUtc: expiresUtc,
+        interruptedProgramState: {
+          ...(execState.interruptedProgramState || {}),
+          manualOverrideAsRunId: asRun.id,
+          manualOverrideStartedAtMs: nowMs
+        }
       });
     } else if (action === 'RETURN_TO_SCHEDULE') {
+      const ovAsRunId = execState.interruptedProgramState?.manualOverrideAsRunId;
+      const ovStartMs = execState.interruptedProgramState?.manualOverrideStartedAtMs || nowMs;
+      if (ovAsRunId) {
+        await schedRepo.updateAsRunRecord(ovAsRunId, req.user.organizationId, {
+          actualEndUtc: nowIso,
+          actualDurationMs: Math.max(0, nowMs - ovStartMs),
+          status: 'COMPLETED',
+          interruptionReason: 'RETURNED_TO_SCHEDULE'
+        }).catch(() => {});
+      }
+      if (execState.emergencyOverrideActive) {
+        await playoutInst.triggerEmergencySwitch({ enabled: false }, { id: req.user.id, ipAddress: req.ip });
+      }
+      const nextInterrupted = { ...(execState.interruptedProgramState || {}) };
+      delete nextInterrupted.manualOverrideAsRunId;
+      delete nextInterrupted.manualOverrideStartedAtMs;
+
+      // Clear active primary video track states so step(nowMs) re-dispatches the currently due scheduled program to the engine
+      const nextTracks = { ...(execState.currentTrackStates || {}) };
+      const activePrimary = nextTracks.MAIN_VIDEO || nextTracks.LIVE_CAMERA_ROTATION;
+      if (activePrimary && playoutInst.proc && !playoutInst.proc.killed) {
+        const activeRev = execState.activeRevisionId
+          ? await schedRepo.getRevisionById(execState.activeRevisionId, req.user.organizationId)
+          : await schedRepo.getActivePublishedRevision(channelId, req.user.organizationId);
+        if (activeRev) {
+          const resumeSeek = activePrimary.trackType === 'MAIN_VIDEO'
+            ? Math.max(0, nowMs - activePrimary.actualStartMs)
+            : 0;
+          await executor._dispatchOccurrenceToEngine(
+            {
+              id: activePrimary.eventId,
+              title: activePrimary.title,
+              trackType: activePrimary.trackType,
+              executionMode: activePrimary.executionMode,
+              mediaAssetId: activePrimary.mediaAssetId,
+              videoSourceId: activePrimary.videoSourceId,
+              plannedStartMs: activePrimary.plannedStartMs,
+              plannedEndMs: activePrimary.plannedEndMs
+            },
+            activeRev,
+            playoutInst,
+            resumeSeek
+          );
+        }
+      }
+
       execState = await schedRepo.updateExecutionState(channelId, req.user.organizationId, {
         manualOverrideActive: false,
         emergencyOverrideActive: false,
         holdActive: false,
         overrideSourceId: null,
-        overrideExpiresAtUtc: null
+        overrideExpiresAtUtc: null,
+        interruptedProgramState: nextInterrupted
       });
       execState = await executor.step(nowMs);
     } else if (action === 'EMERGENCY_OVERRIDE') {
+      // Validate optional emergency override source ownership if a specific UUID/source was supplied
+      if (overrideSourceId && overrideSourceId !== 'emergency:slate') {
+        const cfg = await playoutRepo.getChannelConfig(channelId, req.user.organizationId);
+        const inCameraSeq = (cfg.cameraSequence || []).some(c => c && (c.sourceId === overrideSourceId || c.id === overrideSourceId));
+        const vSrc = !inCameraSeq ? await videoSourcesRepo.findSourceById(overrideSourceId, req.user.organizationId) : null;
+        if (vSrc && vSrc.stationId && vSrc.stationId !== channelId) {
+          return res.status(403).json({ success: false, error: 'Emergency video source belongs to another channel' });
+        }
+        const mAsset = (!inCameraSeq && !vSrc) ? await mediaRepo.findAssetById(overrideSourceId, req.user.organizationId) : null;
+        if (!inCameraSeq && !vSrc && !mAsset) {
+          // Non-existent emergency source triggers emergency fallback slate rather than failing the emergency cut
+          await playoutInst.triggerEmergencySwitch({ enabled: true, emergencySourceId: null }, { id: req.user.id, ipAddress: req.ip });
+        } else {
+          await playoutInst.triggerEmergencySwitch({ enabled: true, emergencySourceId: overrideSourceId }, { id: req.user.id, ipAddress: req.ip });
+        }
+      } else {
+        await playoutInst.triggerEmergencySwitch({ enabled: true, emergencySourceId: null }, { id: req.user.id, ipAddress: req.ip });
+      }
+
+      const emAsRun = await schedRepo.createAsRunRecord({
+        organizationId: req.user.organizationId,
+        channelId,
+        revisionId: execState.activeRevisionId || null,
+        revisionNumber: execState.activeRevisionNumber || 0,
+        eventId: `emergency-override:${overrideSourceId || 'slate'}`,
+        occurrenceId: `emergency-override@${nowMs}`,
+        trackType: 'MAIN_VIDEO',
+        executionMode: 'EMERGENCY_OVERRIDE',
+        title: `Emergency Broadcast Override (${overrideSourceId || 'emergency:slate'})`,
+        category: 'EMERGENCY_OVERRIDE',
+        plannedStartUtc: nowIso,
+        actualStartUtc: nowIso,
+        plannedEndUtc: new Date(nowMs + 3600000).toISOString(),
+        plannedDurationMs: 3600000,
+        status: 'EMERGENCY_OVERRIDE',
+        workerConfirmed: Boolean(playoutInst.proc && !playoutInst.proc.killed),
+        details: { overrideSourceId: overrideSourceId || 'emergency:slate', triggeredBy: req.user.id }
+      });
+
       execState = await schedRepo.updateExecutionState(channelId, req.user.organizationId, {
         emergencyOverrideActive: true,
-        overrideSourceId: overrideSourceId || 'emergency:slate'
+        overrideSourceId: overrideSourceId || 'emergency:slate',
+        interruptedProgramState: {
+          ...(execState.interruptedProgramState || {}),
+          emergencyAsRunId: emAsRun.id,
+          emergencyStartedAtMs: nowMs
+        }
       });
     } else if (action === 'CLEAR_EMERGENCY') {
+      const emAsRunId = execState.interruptedProgramState?.emergencyAsRunId;
+      const emStartMs = execState.interruptedProgramState?.emergencyStartedAtMs || nowMs;
+      if (emAsRunId) {
+        await schedRepo.updateAsRunRecord(emAsRunId, req.user.organizationId, {
+          actualEndUtc: nowIso,
+          actualDurationMs: Math.max(0, nowMs - emStartMs),
+          status: 'COMPLETED',
+          interruptionReason: 'EMERGENCY_CLEARED'
+        }).catch(() => {});
+      }
+      await playoutInst.triggerEmergencySwitch({ enabled: false }, { id: req.user.id, ipAddress: req.ip });
+      const nextInterrupted = { ...(execState.interruptedProgramState || {}) };
+      delete nextInterrupted.emergencyAsRunId;
+      delete nextInterrupted.emergencyStartedAtMs;
       execState = await schedRepo.updateExecutionState(channelId, req.user.organizationId, {
         emergencyOverrideActive: false,
-        overrideSourceId: null
+        overrideSourceId: null,
+        interruptedProgramState: nextInterrupted
       });
+      execState = await executor.step(nowMs);
     }
 
     await RepositoryFactory.getAuditRepository().create({

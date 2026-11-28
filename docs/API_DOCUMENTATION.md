@@ -1,4 +1,4 @@
-# API documentation
+﻿# API documentation
 
 The existing [API reference](API_SPECIFICATION.md) and [backend reference](../backend/docs/API_DOCUMENTATION.md) describe request details. The Phase Zero route-family inventory below reflects the current working tree. Implementations and route middleware govern actual behavior.
 
@@ -46,9 +46,16 @@ Login and Agent pairing claims have independent per-IP limits of 10 requests per
 
 `/api/v1/channels/:channelId/playout*` sets `Cache-Control: private, no-store` and `Referrer-Policy: no-referrer` and verifies organization ownership of `:channelId`. `GET /playout` and `GET /playout/monitor-frame` require `station:read`. `PATCH /playout/config` requires `station:manage` and supports optimistic revision concurrency (`expectedRevision`). `POST /playout/lifecycle` (`start`, `stop`, `restart`), `POST /playout/camera/switch`, `POST /playout/camera/exclude`, `POST /playout/movie/select`, `POST /playout/movie/seek`, and `POST /playout/movie/pause` require `station:control`. `POST /playout/emergency` requires `broadcast:emergency` and records `CHANNEL_EMERGENCY_ACTIVATED` / `CHANNEL_EMERGENCY_CLEARED` audit events. See [PLAYOUT_ENGINE_ARCHITECTURE.md](PLAYOUT_ENGINE_ARCHITECTURE.md).
 
+## Phase Seven — Broadcast Scheduler REST API (`/api/v1/channels/:channelId/scheduler*`)
 
-## Phase Seven - Broadcast Scheduler (2026-11-28)
-Implemented and verified locally (SQLite, local MariaDB 10.4.32 only; Oracle MySQL 8.4 gate G48 remains open). Evidence: `backend/test/broadcast-scheduler.test.js` (5 tests: DST, recurrence, validation, RBAC/draft/publish/concurrency/delete-protection, simulated 72-hour schedule), `backend/verification/two-channel-scheduler-acceptance.js` (two real 1920x1080@25 GStreamer channels, FFprobe/FFmpeg receivers, mid-movie ad resume at 5899 ms, camera failure/recovery, manual override, draft isolation, cross-channel isolation), `backend/verification/mysql-migration-rehearsal.js` (scheduler tables parity), full workspace suite 52/52 passing, frontend build passing.
-Not claimed: a real 72-hour wall-clock endurance run (open production gate); the 72-hour test is validation plus a deterministic clock simulation. Manual override currently sets state flags and pauses scheduled starts; it does not switch the live source itself. Production security gates remain open. Phase Eight not started.
-
-Endpoints: GET /channels/:id/scheduler; PUT .../scheduler/draft; POST .../scheduler/validate; POST .../scheduler/publish; POST .../scheduler/restore; POST .../scheduler/step; POST .../scheduler/control; GET .../scheduler/as-run; GET .../scheduler/epg.
+| Method & Path | Permission | Purpose & Key Request / Response Fields |
+|---|---|---|
+| `GET /api/v1/channels/:channelId/scheduler` | `station:read` | Returns `{ draft, published, revisions, executionState, expandedOccurrences, asRun }` for `[windowStartUtc, windowEndUtc]`. |
+| `PUT /api/v1/channels/:channelId/scheduler/draft` | `schedule:manage` | Saves draft revision (`name`, `timezone`, `activationPolicy`, `gapPolicy`, `events`, `templates`, `expectedRevisionNumber`). Returns `409` on revision mismatch. |
+| `POST /api/v1/channels/:channelId/scheduler/validate` | `schedule:manage` | Runs server-side validation (`validateScheduleRevision`) and persists `validationSummary` (`valid`, `errors`, `warnings`, `gaps`, `occurrenceCount`). |
+| `POST /api/v1/channels/:channelId/scheduler/publish` | `schedule:publish` | Validates and publishes a revision (`APPLY_IMMEDIATELY_SAFE`, `APPLY_NEXT_BOUNDARY`, `APPLY_FUTURE_TIME`, `PRESERVE_CURRENT_ITEM`, `REPLACE_CURRENT_AUTHORIZED`). Returns `409` if blocking errors exist. |
+| `POST /api/v1/channels/:channelId/scheduler/restore` | `schedule:publish` | Restores a historical revision (`sourceRevisionId`) into the active draft (and optionally publishes immediately after re-validation). |
+| `POST /api/v1/channels/:channelId/scheduler/step` | `station:control` | Executes one deterministic scheduler tick at `nowUtc` (or current server time). |
+| `POST /api/v1/channels/:channelId/scheduler/control` | `station:control` (`broadcast:emergency` for emergency actions) | Executes `START_SCHEDULER`, `STOP_SCHEDULER`, `HOLD_CURRENT`, `RELEASE_HOLD`, `TAKE_NEXT`, `SKIP_CURRENT`, `MANUAL_TRIGGER_EVENT`, `MANUAL_SOURCE_OVERRIDE` (`overrideSourceId`, `overrideDurationMs`), `RETURN_TO_SCHEDULE`, `EMERGENCY_OVERRIDE`, or `CLEAR_EMERGENCY`. |
+| `GET /api/v1/channels/:channelId/scheduler/as-run` | `station:read` | Lists worker-confirmed As-Run records (`?limit=&trackType=&status=`) or exports formula-sanitized CSV (`?format=csv`). |
+| `GET /api/v1/channels/:channelId/scheduler/epg` | `station:read` | Generates EPG-compatible program listings (`programs[]`) from the active published schedule. |

@@ -1,4 +1,4 @@
-# Security overview and Phase Zero findings
+﻿# Security overview and Phase Zero findings
 
 ## Observed controls
 
@@ -248,7 +248,7 @@ The centralized Media Library (`/api/v1/media/*`) enforces authentication, organ
 The unified Video Source API (`/api/v1/video-sources*`) requires authentication, organization scope, `station:read` for viewing/previews, and `video:manage` for source registration, updates, health probing and confirmed deletion (`?confirm=true`). All responses carry `Cache-Control: private, no-store` and `Referrer-Policy: no-referrer`.
 
 1. **Protocol Allowlists, SSRF Defense and DRM Prohibition**:
-   - `validateVideoSourceUrl` (`backend/src/infrastructure/sources/video-source-service.js`) enforces strict per-type protocol schemes (`https:` for `HLS_STREAM` and `REMOTE_VIDEO_URL`, `rtmp:`/`rtmps:` for `RTMP_STREAM`, `srt:` in `caller` mode with an explicit port `1024`–`65535` for `SRT_STREAM`, and `rtsp:`/`rtsps:` for `RTSP_STREAM`).
+   - `validateVideoSourceUrl` (`backend/src/infrastructure/sources/video-source-service.js`) enforces strict per-type protocol schemes (`https:` for `HLS_STREAM` and `REMOTE_VIDEO_URL`, `rtmp:`/`rtmps:` for `RTMP_STREAM`, `srt:` in `caller` mode with an explicit port `1024`â€“`65535` for `SRT_STREAM`, and `rtsp:`/`rtsps:` for `RTSP_STREAM`).
    - URLs containing embedded credentials (`username`/`password`), fragments, DRM manifest markers (`widevine`, `playready`, `fairplay`, `drm`, `.key`), non-public hostnames (`localhost`, `.local`, `.internal`, IPv6 literals) or private/loopback/link-local/cloud-metadata (`169.254.0.0/16`)/CGNAT/multicast IPv4 addresses are rejected at both configuration time and connection/probe time.
    - `SERVER_FILE` sources are confined strictly to `MCR_MEDIA_IMPORT_DIR` via `mediaStorage.resolveImportSource`, rejecting path traversal and symbolic links.
 2. **Credential Encryption at Rest**:
@@ -298,7 +298,10 @@ The Channel Playout API (`/api/v1/channels/:channelId/playout*`) enforces authen
 4. **Rollback**:
    - Revert `/api/v1/channels/:channelId/playout*` (`backend/src/presentation/routes/channel-playout.js`), `backend/src/infrastructure/playout/channel-playout-supervisor.js`, `backend/src/infrastructure/playout/channel-worker.py`, and `frontend/src/components/ChannelPlayoutConsole.jsx`. Additive database tables (`channel_playout_configs`) and the legacy single-station `IndependentProgram` path remain intact. See [PLAYOUT_ENGINE_ARCHITECTURE.md](PLAYOUT_ENGINE_ARCHITECTURE.md).
 
+## Phase Seven — Broadcast Scheduler Security Controls
 
-## Phase Seven - Broadcast Scheduler (2026-11-28)
-Implemented and verified locally (SQLite, local MariaDB 10.4.32 only; Oracle MySQL 8.4 gate G48 remains open). Evidence: `backend/test/broadcast-scheduler.test.js` (5 tests: DST, recurrence, validation, RBAC/draft/publish/concurrency/delete-protection, simulated 72-hour schedule), `backend/verification/two-channel-scheduler-acceptance.js` (two real 1920x1080@25 GStreamer channels, FFprobe/FFmpeg receivers, mid-movie ad resume at 5899 ms, camera failure/recovery, manual override, draft isolation, cross-channel isolation), `backend/verification/mysql-migration-rehearsal.js` (scheduler tables parity), full workspace suite 52/52 passing, frontend build passing.
-Not claimed: a real 72-hour wall-clock endurance run (open production gate); the 72-hour test is validation plus a deterministic clock simulation. Manual override currently sets state flags and pauses scheduled starts; it does not switch the live source itself. Production security gates remain open. Phase Eight not started.
+- **Granular RBAC Enforcement:** `station:read` (view schedule, As-Run, EPG), `schedule:manage` (edit/validate draft), `schedule:publish` (publish/restore revisions), `station:control` (start/stop scheduler, manual source override, manual event trigger), and `broadcast:emergency` (required for `EMERGENCY_OVERRIDE` and `CLEAR_EMERGENCY`; ordinary operators/viewers receive HTTP `403`).
+- **Tenant & Channel Reference Isolation:** `validateScheduleRevision` and `POST /scheduler/control` verify that every referenced `mediaAssetId`, `videoSourceId`, and `audioSourceId` belongs to `req.user.organizationId` and is scoped to `:channelId`. Cross-tenant channel requests return `404`; cross-channel video/audio source references are rejected with `403`/`409`.
+- **Resource Exhaustion Protection:** Recurrence expansion is strictly bounded to `MAX_WINDOW_EXPANSION_MS` (14 days) and `MAX_EXPANDED_OCCURRENCES` (2,000 occurrences).
+- **Active Schedule Media Deletion Lock:** `SqliteMediaRepository` and `PrismaMediaRepository` block deletion (`409 SCHEDULED_PLAYBACK`) of any `MediaAsset` referenced by a `PUBLISHED` schedule revision.
+- **CSV Formula Injection Neutralization:** As-Run CSV export (`?format=csv`) sanitizes every cell via `csvTextCell()`.

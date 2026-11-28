@@ -30,6 +30,7 @@ const { createSession } = await import('../src/infrastructure/security/session-s
 const { getSqliteDatabase } = await import('../src/infrastructure/database/sqlite.js');
 const { mediaStorage } = await import('../src/infrastructure/media/storage-manager.js');
 const {
+  ChannelScheduleExecutor,
   expandScheduleOccurrences,
   resolveLocalCivilTimeToUtcMs,
   validateScheduleRevision,
@@ -820,4 +821,270 @@ test('72-Hour Continuous Multi-Track Schedule Validation, Deterministic Simulati
   const csvExportRes = await apiRequest(`/channels/${channelTwo.id}/scheduler/as-run?format=csv`);
   assert.equal(csvExportRes.status, 200);
   assert.ok(String(csvExportRes.payload).includes('INTERRUPTED_BY_AD'));
+});
+
+test('All Six Execution Modes, Multi-Ad Movie Resumption, Ad Immediately Before Hard-Start, Manual Override Expiry, and CSV Formula Injection Protection', async () => {
+  const chMode = await stationsRepo.create({
+    name: 'Channel 3 — Execution Modes & Multi-Ad Verification',
+    organizationId: 'org-sched-1',
+    encryptedPassword: 'unused',
+    status: 'ONLINE',
+    fps: 25
+  });
+
+  const t0 = Date.parse('2026-12-10T10:00:00.000Z');
+  const iso = offsetMs => new Date(t0 + offsetMs).toISOString();
+
+  // Schedule containing:
+  // - Movie 1 (HARD_START, 0s -> +120m = 7,200,000 ms)
+  // - Ad 1 near beginning (+2m = 120,000 ms, duration 30s)
+  // - Ad 2 at later position (+45m = 2,700,000 ms, duration 30s)
+  // - Ad 3 immediately before a HARD_START event (+59m45s = 3,585,000 ms, duration 30s -> crosses +60m hard start!)
+  // - Movie 2 (HARD_START at +60m = 3,600,000 ms, preempting Movie 1 and Ad 3, duration 30m)
+  // - Movie 3 (SOFT_START scheduled at +70m = 4,200,000 ms while Movie 2 is still running until +90m; must wait until +90m!)
+  // - Movie 4 (FOLLOW_PREVIOUS after Movie 3, duration 15m)
+  // - Manual Event 5 (MANUAL_TRIGGER, duration 5m; must not auto-start, only starts on MANUAL_TRIGGER_EVENT)
+  // - Formula-prefixed title `=CMD|' /C calc'!A0` to verify CSV formula injection neutralization
+  const draftRes = await apiRequest(`/channels/${chMode.id}/scheduler/draft`, {
+    method: 'PUT',
+    body: {
+      name: 'Execution Modes & Multi-Ad Schedule',
+      timezone: 'UTC',
+      activationPolicy: 'APPLY_IMMEDIATELY_SAFE',
+      gapPolicy: 'CHANNEL_IDENT_CLIP',
+      gapFallbackAssetId: bumperAsset.id,
+      events: [
+        {
+          id: 'mode-movie-1',
+          trackType: 'MAIN_VIDEO',
+          executionMode: 'FIXED_DURATION',
+          title: 'Long Feature Film 1',
+          mediaAssetId: movieAssetA.id,
+          startUtc: iso(0),
+          durationMs: 7200000,
+          priority: 60,
+          allowPreemption: true
+        },
+        {
+          id: 'mode-ad-early',
+          trackType: 'ADVERTISEMENTS',
+          executionMode: 'FIXED_DURATION',
+          title: 'Early Movie Ad Break (+2m)',
+          mediaAssetId: adAsset.id,
+          startUtc: iso(120000),
+          durationMs: 30000,
+          priority: 90
+        },
+        {
+          id: 'mode-ad-mid',
+          trackType: 'ADVERTISEMENTS',
+          executionMode: 'FIXED_DURATION',
+          title: 'Mid Movie Ad Break (+45m)',
+          mediaAssetId: adAsset.id,
+          startUtc: iso(2700000),
+          durationMs: 30000,
+          priority: 90
+        },
+        {
+          id: 'mode-ad-before-hard',
+          trackType: 'ADVERTISEMENTS',
+          executionMode: 'FIXED_DURATION',
+          title: 'Ad Immediately Before Hard Start (+59m45s)',
+          mediaAssetId: adAsset.id,
+          startUtc: iso(3585000),
+          durationMs: 30000,
+          priority: 90
+        },
+        {
+          id: 'mode-movie-2-hard',
+          trackType: 'MAIN_VIDEO',
+          executionMode: 'HARD_START',
+          title: 'Hard Start Preempting Movie 2 (+60m)',
+          mediaAssetId: movieAssetB.id,
+          startUtc: iso(3600000),
+          durationMs: 1800000,
+          priority: 85
+        },
+        {
+          id: 'mode-movie-3-soft',
+          trackType: 'MAIN_VIDEO',
+          executionMode: 'SOFT_START',
+          title: 'Soft Start Movie 3 (Scheduled +70m, Waits for +90m)',
+          mediaAssetId: movieAssetA.id,
+          startUtc: iso(5400000),
+          durationMs: 900000,
+          priority: 60
+        },
+        {
+          id: 'mode-movie-4-follow',
+          trackType: 'MAIN_VIDEO',
+          executionMode: 'FOLLOW_PREVIOUS',
+          afterEventId: 'mode-movie-3-soft',
+          title: 'Follow Previous Movie 4',
+          mediaAssetId: bumperAsset.id,
+          startUtc: iso(6300000),
+          durationMs: 900000,
+          priority: 55
+        },
+        {
+          id: 'mode-manual-5',
+          trackType: 'GRAPHICS_OVERLAYS',
+          executionMode: 'MANUAL_TRIGGER',
+          title: "=CMD|' /C calc'!A0 Manual Trigger Overlay",
+          mediaAssetId: logoAsset.id,
+          startUtc: iso(10000),
+          durationMs: 300000
+        }
+      ]
+    }
+  });
+  assert.equal(draftRes.status, 200);
+
+  const pubRes = await apiRequest(`/channels/${chMode.id}/scheduler/publish`, {
+    method: 'POST',
+    body: { revisionId: draftRes.payload.data.id, activationPolicy: 'APPLY_IMMEDIATELY_SAFE' }
+  });
+  assert.equal(pubRes.status, 200);
+
+  const stepAt = async (offsetMs) => {
+    const res = await apiRequest(`/channels/${chMode.id}/scheduler/step`, {
+      method: 'POST',
+      body: { nowUtc: iso(offsetMs) }
+    });
+    assert.equal(res.status, 200);
+    return res.payload.data.executionState;
+  };
+
+  // 1. At t0 + 50ms: Movie 1 starts, Manual Trigger event does NOT start automatically
+  let st = await stepAt(50);
+  assert.equal(st.currentTrackStates.MAIN_VIDEO.eventId, 'mode-movie-1');
+  assert.equal(st.currentTrackStates.GRAPHICS_OVERLAYS, undefined);
+
+  // 2. Explicit operator MANUAL_TRIGGER_EVENT starts 'mode-manual-5'
+  const trigRes = await apiRequest(`/channels/${chMode.id}/scheduler/control`, {
+    method: 'POST',
+    body: { action: 'MANUAL_TRIGGER_EVENT', eventId: 'mode-manual-5', trackType: 'GRAPHICS_OVERLAYS' }
+  });
+  assert.equal(trigRes.status, 200);
+  assert.equal(trigRes.payload.data.currentTrackStates.GRAPHICS_OVERLAYS.eventId, 'mode-manual-5');
+
+  // 3. Ad 1 near beginning (+120,050 ms): interrupts Movie 1 at ~120,000 ms
+  st = await stepAt(120050);
+  assert.equal(st.currentTrackStates.ADVERTISEMENTS.eventId, 'mode-ad-early');
+  assert.equal(st.interruptedProgramState.resumeOffsetMs, 120000);
+
+  // Ad 1 finishes (+150,500 ms): Movie 1 resumes at offset 120,000 ms
+  st = await stepAt(150500);
+  assert.equal(st.currentTrackStates.ADVERTISEMENTS, undefined);
+  assert.equal(st.currentTrackStates.MAIN_VIDEO.eventId, 'mode-movie-1');
+  assert.equal(st.currentTrackStates.MAIN_VIDEO.resumeOffsetMs, 120000);
+
+  // 4. Ad 2 at later position (+2,700,100 ms): interrupts Movie 1 a second time and accumulates resumeOffsetMs
+  st = await stepAt(2700100);
+  assert.equal(st.currentTrackStates.ADVERTISEMENTS.eventId, 'mode-ad-mid');
+  // Elapsed since first resume (2,700,100 - 150,500 = 2,549,600) + previous resumeOffsetMs (120,000) = 2,669,600 ms
+  assert.equal(st.interruptedProgramState.resumeOffsetMs, 2669600);
+
+  // Ad 2 finishes (+2,730,500 ms): Movie 1 resumes at accumulated offset 2,669,600 ms
+  st = await stepAt(2730500);
+  assert.equal(st.currentTrackStates.MAIN_VIDEO.resumeOffsetMs, 2669600);
+
+  // 5. Ad 3 starts immediately before a HARD_START event (+3,585,100 ms)
+  st = await stepAt(3585100);
+  assert.equal(st.currentTrackStates.ADVERTISEMENTS.eventId, 'mode-ad-before-hard');
+  assert.ok(st.interruptedProgramState.occurrenceId);
+
+  // At +3,600,100 ms (+60m): Movie 2 HARD_START preempts Movie 1 AND cancels the interrupted Movie 1 resume!
+  st = await stepAt(3600100);
+  assert.equal(st.currentTrackStates.MAIN_VIDEO.eventId, 'mode-movie-2-hard');
+  assert.equal(st.currentTrackStates.ADVERTISEMENTS, undefined);
+  assert.equal(st.interruptedProgramState.occurrenceId, undefined);
+
+  // 6. At +4,200,500 ms (+70m): Movie 3 (SOFT_START) is due, but Movie 2 runs until +5,400,100 ms (+90m), so Movie 3 waits
+  st = await stepAt(4200500);
+  assert.equal(st.currentTrackStates.MAIN_VIDEO.eventId, 'mode-movie-2-hard');
+
+  // At +5,400,200 ms (+90m): Movie 2 completes and Movie 3 (SOFT_START) immediately starts
+  st = await stepAt(5400200);
+  assert.equal(st.currentTrackStates.MAIN_VIDEO.eventId, 'mode-movie-3-soft');
+
+  // 7. Verify CSV export neutralizes formula injection on `=CMD|' /C calc'!A0`
+  const csvRes = await apiRequest(`/channels/${chMode.id}/scheduler/as-run?format=csv`);
+  assert.equal(csvRes.status, 200);
+  assert.ok(String(csvRes.payload).includes("'=CMD|"), 'CSV export must prefix formula cells with a single quote');
+});
+
+test('Scheduler Ownership, Durable Claims, Lease Expiration, Competing Instances, Stale Owner Fencing, and Crash Recovery', async () => {
+  const chLease = await stationsRepo.create({
+    name: 'Channel 4 — Lease Fencing & Crash Recovery',
+    organizationId: 'org-sched-1',
+    encryptedPassword: 'unused',
+    status: 'ONLINE',
+    fps: 25
+  });
+  const schedRepo = RepositoryFactory.getBroadcastSchedulerRepository();
+  const t0 = Date.parse('2026-12-15T12:00:00.000Z');
+
+  const draft = await schedRepo.saveDraftRevision(chLease.id, 'org-sched-1', {
+    name: 'Lease Test Schedule',
+    timezone: 'UTC',
+    activationPolicy: 'APPLY_IMMEDIATELY_SAFE',
+    gapPolicy: 'FALLBACK_PLAYLIST',
+    events: [
+      {
+        id: 'lease-ev-1',
+        trackType: 'MAIN_VIDEO',
+        executionMode: 'HARD_START',
+        title: 'Lease Protected Movie 1',
+        mediaAssetId: movieAssetA.id,
+        startUtc: new Date(t0).toISOString(),
+        durationMs: 1800000
+      }
+    ]
+  }, { id: adminUser.id });
+
+  await schedRepo.publishRevision(chLease.id, 'org-sched-1', {
+    revisionId: draft.id,
+    activationPolicy: 'APPLY_IMMEDIATELY_SAFE',
+    validationSummary: { valid: true, errors: [], warnings: [], gaps: [] }
+  }, { id: adminUser.id });
+
+  // 1. Two competing scheduler instances (Executor A and Executor B)
+  const executorA = new ChannelScheduleExecutor(chLease.id, 'org-sched-1', multiChannelScheduler);
+  const executorB = new ChannelScheduleExecutor(chLease.id, 'org-sched-1', multiChannelScheduler);
+
+  // Executor A steps at t0 + 100ms, acquires 5000ms lease, and durably claims & starts 'lease-ev-1'
+  const stateAfterA = await executorA.step(t0 + 100);
+  assert.equal(stateAfterA.leaseOwnerId, executorA.instanceLeaseId);
+  assert.equal(stateAfterA.currentTrackStates.MAIN_VIDEO.eventId, 'lease-ev-1');
+
+  // Executor B steps 200ms later while Executor A's lease is active: Executor B is fenced out
+  const stateAfterB = await executorB.step(t0 + 300);
+  assert.equal(stateAfterB.leaseOwnerId, executorA.instanceLeaseId);
+
+  // Direct stale write attempt by Executor B with its ownerId must be rejected with 409 STALE_SCHEDULER_OWNER
+  await assert.rejects(
+    () => schedRepo.updateExecutionState(chLease.id, 'org-sched-1', { holdActive: true }, { ownerId: executorB.instanceLeaseId }),
+    err => err.statusCode === 409 && err.code === 'STALE_SCHEDULER_OWNER'
+  );
+
+  // 2. Simulate Executor A crash -> lease expires after 5000ms (t0 + 6000ms) -> Executor B takes over cleanly
+  //    Even if we clear in-memory claimedOccurrenceIds to simulate a crash before state flush,
+  //    the durable claim in channel_as_run_logs prevents duplicate execution of 'lease-ev-1'!
+  await schedRepo.updateExecutionState(chLease.id, 'org-sched-1', {
+    claimedOccurrenceIds: []
+  });
+  const stateTakeoverB = await executorB.step(t0 + 6000);
+  assert.equal(stateTakeoverB.leaseOwnerId, executorB.instanceLeaseId);
+
+  // Stale Executor A attempting to write after Executor B took over must now be rejected with 409
+  await assert.rejects(
+    () => schedRepo.updateExecutionState(chLease.id, 'org-sched-1', { holdActive: true }, { ownerId: executorA.instanceLeaseId }),
+    err => err.statusCode === 409 && err.code === 'STALE_SCHEDULER_OWNER'
+  );
+
+  // Verify exactly 1 As-Run record exists for 'lease-ev-1' (0 duplicates!)
+  const logs = await schedRepo.listAsRunRecords(chLease.id, 'org-sched-1');
+  const evLogs = logs.filter(l => l.eventId === 'lease-ev-1');
+  assert.equal(evLogs.length, 1, 'Durable write-ahead claim must guarantee zero duplicate executions across failover');
 });

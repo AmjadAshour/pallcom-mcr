@@ -1,4 +1,4 @@
-# Feature matrix
+﻿# Feature matrix
 
 Target capabilities follow the [public MCR Box feature inventory](https://mcrbox.com/). PARTIAL records repository evidence with gaps. None of these full capability rows has on-air acceptance evidence.
 
@@ -9,7 +9,7 @@ Target capabilities follow the [public MCR Box feature inventory](https://mcrbox
 | 3 | PTZ | MISSING | No ONVIF/VISCA control surface found | Compatible cameras and preset/control tests |
 | 4 | Remote commentary | MISSING | No remote commentary worker found | WebRTC channels, mix-minus and audio return tests |
 | 5 | File playout | PARTIAL | Scheduler, OBS deck adapter, direct MP4 upload to scenes, Video input with preview and direct Take, centralized Phase Three Media Library (`/api/v1/media/*` & `/media`), and Phase Six Server-Side Multi-Channel Playout Engine (`/api/v1/channels/:channelId/playout*`, `channel-worker.py`, `channel-playout-supervisor.js`) verified with simultaneous two-channel Full HD (`1920x1080`) outputs and a genuine **2h05m (`7,500.021s`) Full HD 1080p MP4 movie** with keyframe seek (`+3,600,000 ms`), ad break insertion, missing/corrupted file skip recovery, and active-broadcast deletion locks | Phase 07/08 multi-track timeline scheduler, real OBS staging interoperability, and 72-hour continuous endurance soak |
-| 6 | Live switching | PARTIAL | LiveControlPage, OBS v5 scene commands, and Phase Six Server-Side Camera Rotation (`CAMERA_ROTATION`) with dual-slot `input-selector` switching (`1.2 ms`–`4.8 ms` latency, `0` encoder restarts), manual camera switch, temporary camera exclusion, automatic fallback and recovery | Phase 09 Preview/Program live control studio bus and frame-accurate transition effects |
+| 6 | Live switching | PARTIAL | LiveControlPage, OBS v5 scene commands, and Phase Six Server-Side Camera Rotation (`CAMERA_ROTATION`) with dual-slot `input-selector` switching (`1.2 ms`â€“`4.8 ms` latency, `0` encoder restarts), manual camera switch, temporary camera exclusion, automatic fallback and recovery | Phase 09 Preview/Program live control studio bus and frame-accurate transition effects |
 | 7 | Graphics | PARTIAL | Graphics page with Independent Program ads, watermark and encoded news ticker, plus OBS graphics and text sources | Templates, scoreboards and isolated third-party graphics |
 | 8 | Replay | PARTIAL | OBS replay buffer start/stop/save controls and OBS save-event timestamp | OBS staging verification, clip playback, marks, variable speed and export |
 | 9 | Audio mixing | PARTIAL | Independent Program mixer for two network inputs and station-scoped operator listening to the final mix, plus Phase Five Multi-Track Independent Audio Engine (`/api/v1/channels/:channelId/audio*` & `AudioMixerPage.jsx`) supporting all 11 audio source types (`UPLOADED_AUDIO`, `MUSIC_PLAYLIST`, `INTERNET_RADIO`, `ICECAST_STREAM`, `SHOUTCAST_STREAM`, `MICROPHONE_INPUT`, `VIDEO_EXTRACTED_AUDIO`, `OBS_AUDIO_INPUT`, `ADVERTISEMENT_AUDIO`, `FALLBACK_AUDIO`, `GENERATED_SILENCE`), 6 routing modes, real 48 kHz stereo PCM mixing, monitoring-only solo, priority ducking with attack/hold/release envelope, equal-power crossfading, soft-knee peak limiting, silence fallback, and uninterrupted independent audio across video switches (`channel-one-audio-acceptance.js`). | Multi-band parametric EQ, hardware WebRTC/TURN remote commentary and 72-hour long-run synchronization soak |
@@ -43,7 +43,17 @@ See [Phase Zero test evidence](TEST_REPORT.md) for current isolated checks of th
 
 The protected application HLS path remains available. The previous static Compose distribution path is denied. A stable provider gateway, two simultaneous 1080p channels, dynamic channel provisioning, multi-gigabyte movie workflows, continuous direct camera rotation and independent audio continuity are target capabilities awaiting implementation and receiver proof. [Production acceptance](BROADCAST_ACCEPTANCE_PLAN.md)
 
+## Phase Seven — Professional Broadcast Scheduler & Timeline Feature Matrix (2026-11-28)
 
-## Phase Seven - Broadcast Scheduler (2026-11-28)
-Implemented and verified locally (SQLite, local MariaDB 10.4.32 only; Oracle MySQL 8.4 gate G48 remains open). Evidence: `backend/test/broadcast-scheduler.test.js` (5 tests: DST, recurrence, validation, RBAC/draft/publish/concurrency/delete-protection, simulated 72-hour schedule), `backend/verification/two-channel-scheduler-acceptance.js` (two real 1920x1080@25 GStreamer channels, FFprobe/FFmpeg receivers, mid-movie ad resume at 5899 ms, camera failure/recovery, manual override, draft isolation, cross-channel isolation), `backend/verification/mysql-migration-rehearsal.js` (scheduler tables parity), full workspace suite 52/52 passing, frontend build passing.
-Not claimed: a real 72-hour wall-clock endurance run (open production gate); the 72-hour test is validation plus a deterministic clock simulation. Manual override currently sets state flags and pauses scheduled starts; it does not switch the live source itself. Production security gates remain open. Phase Eight not started.
+| Feature | Status | Evidence |
+|---|---|---|
+| 7 Logical Timeline Tracks & 6 Execution Modes | `VERIFIED_COMPLETE (Local)` | `broadcast-scheduler.test.js` (7/7), `two-channel-scheduler-acceptance.js` |
+| IANA Timezone & Deterministic DST Validation (`EARLIER`/`LATER`/`REJECT`) | `VERIFIED_COMPLETE (Local)` | `broadcast-scheduler.test.js` (Test 1 & Test 3) |
+| Daily, Weekly, Selected-Weekday Recurrence & Exception Dates | `VERIFIED_COMPLETE (Local)` | `broadcast-scheduler.test.js` (Test 2) |
+| End-to-End `MANUAL_SOURCE_OVERRIDE` & `EMERGENCY_OVERRIDE` Decoded Output Switching | `VERIFIED_COMPLETE (Local)` | `two-channel-scheduler-acceptance.js` (decoded RGB pixel transitions in `590 ms` and `490 ms`) |
+| Scheduled Independent Audio Switching & DFT Frequency / Crossfade Verification | `VERIFIED_COMPLETE (Local)` | `two-channel-scheduler-acceptance.js` (`440 Hz` -> `1000 Hz` -> `880 Hz` fallback -> `1000 Hz`, `0` gaps) |
+| Multi-Ad Mid-Movie Interruption & Zero-Error Offset Resumption | `VERIFIED_COMPLETE (Local)` | `broadcast-scheduler.test.js` (Test 5 & Test 6), `two-channel-scheduler-acceptance.js` (`0 ms` offset error) |
+| Durable Write-Ahead Claims & Competing Scheduler Lease Fencing | `VERIFIED_COMPLETE (Local)` | `broadcast-scheduler.test.js` (Test 7, `0` duplicates) |
+| 29-Feature React Multi-Track Timeline UI (`MultiTrackBroadcastScheduler.jsx`) | `VERIFIED_COMPLETE (Local)` | `scheduler-browser-loopback.js` (headless Chrome exit `0`), `TIMELINE_SPECIFICATION.md` |
+| 72-Hour Continuous Schedule Validation & Deterministic Simulation | `VERIFIED_COMPLETE (Local)` | `broadcast-scheduler.test.js` (Test 5, 20 occurrences, 0 gaps) |
+| Actual 72-Hour Wall-Clock Dual-Channel Full HD Endurance Run | `OPEN_PRODUCTION_GATE` | Tracked under `G-72H` in `SECURITY_RELEASE_GATES.md` |

@@ -405,6 +405,13 @@ export class ChannelAudioEngine {
     this.tickTimer = null;
     this.frameCounter = 0;
     this.videoSwitchEvents = [];
+    this.activeCrossfade = null; // { fromSourceId, toSourceId, totalFrames, elapsedFrames }
+  }
+
+  startCrossfade(fromSourceId, toSourceId, durationMs = 500) {
+    if (!fromSourceId || !toSourceId || fromSourceId === toSourceId) return;
+    const totalFrames = Math.max(1, Math.round(Number(durationMs || 500) / FRAME_DURATION_MS));
+    this.activeCrossfade = { fromSourceId, toSourceId, totalFrames, elapsedFrames: 0 };
   }
 
   loadSourcePcm(sourceId, pcmBuffer, metadata = {}) {
@@ -499,10 +506,27 @@ export class ChannelAudioEngine {
       audioRepo.getChannelMixerConfig(this.channelId, this.organizationId)
     ]);
 
-    const preparedSources = sources.map(src => ({
-      ...src,
-      pcmFrame: this._nextFrameForSource(src)
-    }));
+    const preparedSources = sources.map(src => {
+      const cf = this.activeCrossfade;
+      const inCrossfade = Boolean(cf && (src.id === cf.fromSourceId || src.id === cf.toSourceId));
+      const effectiveSrc = inCrossfade ? { ...src, enabled: true } : src;
+      let crossfadeWeight;
+      if (inCrossfade) {
+        const t = Math.min(1, cf.elapsedFrames / cf.totalFrames);
+        crossfadeWeight = src.id === cf.fromSourceId ? Math.cos(t * 0.5 * Math.PI) : Math.sin(t * 0.5 * Math.PI);
+      }
+      return {
+        ...effectiveSrc,
+        ...(crossfadeWeight !== undefined ? { crossfadeWeight } : {}),
+        pcmFrame: this._nextFrameForSource(effectiveSrc)
+      };
+    });
+    if (this.activeCrossfade) {
+      this.activeCrossfade.elapsedFrames += 1;
+      if (this.activeCrossfade.elapsedFrames >= this.activeCrossfade.totalFrames) {
+        this.activeCrossfade = null;
+      }
+    }
 
     // Check if primary music/radio sources have no signal and activate fallback source if configured
     const hasPrimarySignal = preparedSources.some(

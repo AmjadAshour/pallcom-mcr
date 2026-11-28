@@ -456,19 +456,24 @@ export class ChannelPlayoutInstance {
       try {
         const audioRepo = RepositoryFactory.getAudioRepository();
         const mixerConfig = await audioRepo.getChannelMixerConfig(this.channelId, this.organizationId);
-        const step = await audioEngine.stepFrame({ persistMeters: false });
-        let pcmToPush = step.broadcastMix.pcmBuffer;
-        const movieAudio = audioEngine.sourceBuffers.get('__channel_movie_audio__');
-        if (movieAudio?.pcm?.length >= 3840 && step.broadcastMix.masterRmsDbfs <= -70) {
-          const end = (movieAudio.cursorBytes || 0) + 3840;
-          if (end <= movieAudio.pcm.length) {
-            pcmToPush = movieAudio.pcm.subarray(movieAudio.cursorBytes || 0, end);
-            movieAudio.cursorBytes = end === movieAudio.pcm.length ? 0 : end;
-          } else {
-            pcmToPush = movieAudio.pcm.subarray(0, 3840);
-            movieAudio.cursorBytes = 3840;
+        const chunks = [];
+        for (let f = 0; f < 2; f++) {
+          const step = await audioEngine.stepFrame({ persistMeters: false });
+          let pcmToPush = step.broadcastMix.pcmBuffer;
+          const movieAudio = audioEngine.sourceBuffers.get('__channel_movie_audio__');
+          if (movieAudio?.pcm?.length >= 3840 && step.broadcastMix.masterRmsDbfs <= -70) {
+            const end = (movieAudio.cursorBytes || 0) + 3840;
+            if (end <= movieAudio.pcm.length) {
+              pcmToPush = movieAudio.pcm.subarray(movieAudio.cursorBytes || 0, end);
+              movieAudio.cursorBytes = end === movieAudio.pcm.length ? 0 : end;
+            } else {
+              pcmToPush = movieAudio.pcm.subarray(0, 3840);
+              movieAudio.cursorBytes = 3840;
+            }
           }
+          chunks.push(pcmToPush);
         }
+        const combinedPcm = Buffer.concat(chunks);
         const mode = [
           'EXTERNAL_REPLACES_VIDEO_AUDIO',
           'SILENT_VIDEO_WITH_INDEPENDENT_AUDIO'
@@ -481,7 +486,7 @@ export class ChannelPlayoutInstance {
           await this.sendWorkerCommand({
             cmd: 'external_audio',
             mode,
-            pcmBase64: pcmToPush.toString('base64')
+            pcmBase64: combinedPcm.toString('base64')
           }, false);
         } else {
           await this.sendWorkerCommand({
@@ -828,39 +833,214 @@ export class ChannelPlayoutInstance {
   }
 
   async _activateSpecificSource(sourceId, config) {
+    if (!sourceId) {
+      await this.sendWorkerCommand({ cmd: 'switch_slot', slot: 'fallback', sourceId: 'fallback:slate' }, true);
+      return { ok: true, mode: 'FALLBACK_SLATE', fallbackActivated: true };
+    }
+
+    const repo = RepositoryFactory.getChannelPlayoutRepository();
     const videoSourcesRepo = RepositoryFactory.getVideoSourceRepository();
     const mediaRepo = RepositoryFactory.getMediaRepository();
+    const liveConfig = config || (await repo.getChannelConfig(this.channelId, this.organizationId));
+
+    // 1. Check if sourceId matches a configured camera in config.cameraSequence (by sourceId or id)
+    const sequence = Array.isArray(liveConfig.cameraSequence) ? liveConfig.cameraSequence : [];
+    const camIdx = sequence.findIndex(e => e && (e.sourceId === sourceId || e.id === sourceId));
+    if (camIdx >= 0) {
+      const entry = sequence[camIdx];
+      if (entry.enabled === false || this.cameraExclusions.has(entry.sourceId || entry.id)) {
+        await this._activateFallback(liveConfig, `OVERRIDE_CAMERA_EXCLUDED:${sourceId}`);
+        return { ok: false, mode: 'FALLBACK_ACTIVE', fallbackActivated: true, reason: 'OVERRIDE_CAMERA_EXCLUDED' };
+      }
+      if (this.rotationTimer) {
+        clearTimeout(this.rotationTimer);
+        this.rotationTimer = null;
+      }
+      const nextSlot = this.activeLiveSlot === 'live1' ? 'live2' : 'live1';
+      this.activeLiveSlot = nextSlot;
+      const udpPort = entry.udpPort || null;
+      let uri = entry.uri || null;
+      if (uri && !udpPort) {
+        uri = validateCameraDestinationWithAllowlist(uri, liveConfig.networkAllowlist);
+      }
+      const t0 = performance.now();
+      await this.sendWorkerCommand({
+        cmd: 'configure_live',
+        slot: nextSlot,
+        sourceId: entry.sourceId || entry.id,
+        uri,
+        udpPort,
+        audioEnabled: false,
+        switchImmediate: true
+      }, true);
+      const transitionMs = Math.round((performance.now() - t0) * 100) / 100;
+      this.transitionHistory.push({
+        at: new Date().toISOString(),
+        kind: 'MANUAL_OVERRIDE_CAMERA_SWITCH',
+        toSourceId: entry.sourceId || entry.id,
+        cameraIndex: camIdx,
+        slot: nextSlot,
+        transitionMs
+      });
+      await repo.updateRuntimeCheckpoint(this.channelId, this.organizationId, {
+        runtimeState: CHANNEL_RUNTIME_STATES.RUNNING,
+        activeCameraIndex: camIdx,
+        currentSourceId: entry.sourceId || entry.id,
+        fallbackActive: false,
+        lastError: null
+      });
+      return { ok: true, mode: 'CAMERA_SLOT', fallbackActivated: false, transitionMs };
+    }
+
+    // 2. Check if sourceId matches an organization-scoped VideoSource
     const vSource = await videoSourcesRepo.findSourceById(sourceId, this.organizationId);
-    if (vSource?.mediaAssetId) {
-      const asset = await mediaRepo.findAssetById(vSource.mediaAssetId, this.organizationId);
-      if (asset && asset.processingStatus === MEDIA_PROCESSING_STATUS.READY) {
-        const filePath = mediaStorage.resolveKeyPath(asset.storageKey);
-        await this.sendWorkerCommand({
-          cmd: 'play_file',
-          assetId: asset.id,
-          sourceId: vSource.id,
-          filePath,
-          seekMs: 0,
-          durationMs: Math.round(Number(asset.durationSeconds || 0) * 1000)
-        }, true);
-        return true;
+    if (vSource) {
+      if (vSource.stationId && vSource.stationId !== this.channelId) {
+        throw Object.assign(new Error(`VideoSource ${sourceId} belongs to a different channel`), { statusCode: 403 });
+      }
+      if (vSource.connectionStatus === 'ERROR' || vSource.availabilityStatus === 'UNAVAILABLE') {
+        await this._activateFallback(liveConfig, `OVERRIDE_SOURCE_UNAVAILABLE:${sourceId}`);
+        return { ok: false, mode: 'FALLBACK_ACTIVE', fallbackActivated: true, reason: 'OVERRIDE_SOURCE_UNAVAILABLE' };
+      }
+      if (vSource.mediaAssetId) {
+        const asset = await mediaRepo.findAssetById(vSource.mediaAssetId, this.organizationId);
+        if (asset && asset.processingStatus === MEDIA_PROCESSING_STATUS.READY && asset.hasVideo) {
+          try {
+            const filePath = mediaStorage.resolveKeyPath(asset.storageKey);
+            const info = await mediaStorage.verifyNoSymlink(filePath);
+            if (!info || !info.isFile()) throw new Error('Missing file');
+            const reply = await this.sendWorkerCommand({
+              cmd: 'play_file',
+              assetId: asset.id,
+              sourceId: vSource.id,
+              filePath,
+              seekMs: 0,
+              durationMs: Math.round(Number(asset.durationSeconds || 0) * 1000)
+            }, true);
+            if (reply?.reply === 'file_playing') {
+              await repo.updateRuntimeCheckpoint(this.channelId, this.organizationId, {
+                runtimeState: CHANNEL_RUNTIME_STATES.RUNNING,
+                currentMediaAssetId: asset.id,
+                currentSourceId: vSource.id,
+                fallbackActive: false,
+                lastError: null
+              });
+              return { ok: true, mode: 'VIDEO_SOURCE_MEDIA', fallbackActivated: false };
+            }
+          } catch {
+            // Fall through to fallback
+          }
+        }
+        await this._activateFallback(liveConfig, `OVERRIDE_SOURCE_MEDIA_INVALID:${sourceId}`);
+        return { ok: false, mode: 'FALLBACK_ACTIVE', fallbackActivated: true, reason: 'OVERRIDE_SOURCE_MEDIA_INVALID' };
+      }
+      if (vSource.streamUrl) {
+        try {
+          if (this.rotationTimer) {
+            clearTimeout(this.rotationTimer);
+            this.rotationTimer = null;
+          }
+          const nextSlot = this.activeLiveSlot === 'live1' ? 'live2' : 'live1';
+          this.activeLiveSlot = nextSlot;
+          let udpPort = null;
+          let uri = vSource.streamUrl;
+          const udpMatch = /^udp:\/\/127\.0\.0\.1:(\d+)/i.exec(uri);
+          if (udpMatch) {
+            udpPort = Number(udpMatch[1]);
+            uri = null;
+          } else {
+            uri = validateCameraDestinationWithAllowlist(uri, liveConfig.networkAllowlist);
+          }
+          await this.sendWorkerCommand({
+            cmd: 'configure_live',
+            slot: nextSlot,
+            sourceId: vSource.id,
+            uri,
+            udpPort,
+            audioEnabled: false,
+            switchImmediate: true
+          }, true);
+          await repo.updateRuntimeCheckpoint(this.channelId, this.organizationId, {
+            runtimeState: CHANNEL_RUNTIME_STATES.RUNNING,
+            currentSourceId: vSource.id,
+            fallbackActive: false,
+            lastError: null
+          });
+          return { ok: true, mode: 'VIDEO_SOURCE_STREAM', fallbackActivated: false };
+        } catch {
+          await this._activateFallback(liveConfig, `OVERRIDE_STREAM_FAILED:${sourceId}`);
+          return { ok: false, mode: 'FALLBACK_ACTIVE', fallbackActivated: true, reason: 'OVERRIDE_STREAM_FAILED' };
+        }
       }
     }
+
+    // 3. Check if sourceId matches an organization-scoped MediaAsset
     const asset = await mediaRepo.findAssetById(sourceId, this.organizationId);
-    if (asset && asset.processingStatus === MEDIA_PROCESSING_STATUS.READY) {
-      const filePath = mediaStorage.resolveKeyPath(asset.storageKey);
-      await this.sendWorkerCommand({
-        cmd: 'play_file',
-        assetId: asset.id,
-        sourceId: asset.id,
-        filePath,
-        seekMs: 0,
-        durationMs: Math.round(Number(asset.durationSeconds || 0) * 1000)
-      }, true);
-      return true;
+    if (asset) {
+      if (asset.processingStatus === MEDIA_PROCESSING_STATUS.READY && asset.hasVideo) {
+        try {
+          const filePath = mediaStorage.resolveKeyPath(asset.storageKey);
+          const info = await mediaStorage.verifyNoSymlink(filePath);
+          if (!info || !info.isFile()) throw new Error('Override media file missing on disk');
+          if (this.rotationTimer) {
+            clearTimeout(this.rotationTimer);
+            this.rotationTimer = null;
+          }
+          const durationMs = Math.round(Number(asset.durationSeconds || 0) * 1000);
+          const reply = await this.sendWorkerCommand({
+            cmd: 'play_file',
+            assetId: asset.id,
+            sourceId: asset.id,
+            filePath,
+            seekMs: 0,
+            durationMs
+          }, true);
+          if (reply?.reply === 'file_playing') {
+            try {
+              const { decodeMediaFileToPcm } = await import('../audio/audio-mixer-engine.js');
+              const pcm = await decodeMediaFileToPcm(filePath, 15);
+              if (pcm?.length) {
+                multiChannelAudio.getEngine(this.channelId, this.organizationId).loadSourcePcm('__channel_movie_audio__', pcm);
+              }
+            } catch {}
+            this.transitionHistory.push({
+              at: new Date().toISOString(),
+              kind: 'OVERRIDE_MEDIA_PLAY',
+              assetId: asset.id
+            });
+            await repo.updateRuntimeCheckpoint(this.channelId, this.organizationId, {
+              runtimeState: CHANNEL_RUNTIME_STATES.RUNNING,
+              currentMediaAssetId: asset.id,
+              currentSourceId: asset.id,
+              playbackPositionMs: 0,
+              remainingDurationMs: durationMs || null,
+              paused: false,
+              fallbackActive: false,
+              lastError: null
+            });
+            return { ok: true, mode: 'MEDIA_ASSET', fallbackActivated: false };
+          }
+        } catch {
+          // Fall through to fallback activation below
+        }
+      }
+      await this._activateFallback(liveConfig, `OVERRIDE_ASSET_UNPLAYABLE:${sourceId}`);
+      return { ok: false, mode: 'FALLBACK_ACTIVE', fallbackActivated: true, reason: 'OVERRIDE_ASSET_UNPLAYABLE' };
     }
-    await this.sendWorkerCommand({ cmd: 'switch_slot', slot: 'fallback', sourceId }, true);
-    return true;
+
+    // 4. Explicit slate or unrecognized/failed source -> activate channel fallback
+    if (sourceId === 'emergency:slate' || sourceId === 'fallback:slate') {
+      await this.sendWorkerCommand({ cmd: 'switch_slot', slot: 'fallback', sourceId }, true);
+      await repo.updateRuntimeCheckpoint(this.channelId, this.organizationId, {
+        runtimeState: CHANNEL_RUNTIME_STATES.FALLBACK_ACTIVE,
+        currentSourceId: sourceId,
+        fallbackActive: true
+      });
+      return { ok: true, mode: 'EMERGENCY_SLATE', fallbackActivated: true };
+    }
+
+    await this._activateFallback(liveConfig, `OVERRIDE_SOURCE_FAILED:${sourceId}`);
+    return { ok: false, mode: 'FALLBACK_ACTIVE', fallbackActivated: true, reason: 'OVERRIDE_SOURCE_FAILED' };
   }
 
   async _activateFallback(config, reason) {
@@ -1084,16 +1264,45 @@ export class ChannelPlayoutInstance {
     });
   }
 
+  async triggerManualSourceOverride({ sourceId }, actor = null) {
+    return this.serialize(async () => {
+      const repo = RepositoryFactory.getChannelPlayoutRepository();
+      const config = await repo.getChannelConfig(this.channelId, this.organizationId);
+      let outcome = { ok: false, workerConfirmed: false, mode: 'CONFIG_ONLY', fallbackActivated: false };
+      if (this.proc && !this.proc.killed) {
+        const res = await this._activateSpecificSource(sourceId, config);
+        outcome = { ...res, workerConfirmed: true };
+      } else {
+        await repo.updateRuntimeCheckpoint(this.channelId, this.organizationId, {
+          currentSourceId: sourceId
+        });
+      }
+      if (actor) {
+        await RepositoryFactory.getAuditRepository().create({
+          organizationId: this.organizationId,
+          userId: actor.id,
+          action: 'CHANNEL_MANUAL_SOURCE_OVERRIDE',
+          resourceType: 'ChannelPlayoutConfig',
+          resourceId: this.channelId,
+          details: { channelId: this.channelId, sourceId, ...outcome },
+          ipAddress: actor.ipAddress
+        });
+      }
+      return { outcome, snapshot: await this.getFullSnapshot() };
+    });
+  }
+
   async triggerEmergencySwitch({ enabled, emergencySourceId = null }, actor) {
     return this.serialize(async () => {
       const repo = RepositoryFactory.getChannelPlayoutRepository();
+      const currentCfg = await repo.getChannelConfig(this.channelId, this.organizationId);
       const config = await repo.saveChannelConfig(this.channelId, this.organizationId, {
         emergencyActive: Boolean(enabled),
         emergencySourceId: enabled ? emergencySourceId : null,
-        runtimeState: enabled ? CHANNEL_RUNTIME_STATES.FALLBACK_ACTIVE : config?.runtimeState || CHANNEL_RUNTIME_STATES.RUNNING
+        runtimeState: enabled ? CHANNEL_RUNTIME_STATES.FALLBACK_ACTIVE : currentCfg?.runtimeState || CHANNEL_RUNTIME_STATES.RUNNING
       }, { ...actor, auditAction: enabled ? 'CHANNEL_EMERGENCY_ACTIVATED' : 'CHANNEL_EMERGENCY_CLEARED' });
 
-      if (this.proc) {
+      if (this.proc && !this.proc.killed) {
         if (enabled) {
           if (this.rotationTimer) {
             clearTimeout(this.rotationTimer);
@@ -1102,7 +1311,7 @@ export class ChannelPlayoutInstance {
           if (emergencySourceId) {
             await this._activateSpecificSource(emergencySourceId, config);
           } else {
-            await this.sendWorkerCommand({ cmd: 'switch_slot', slot: 'fallback', sourceId: 'emergency:slate' }, true);
+            await this._activateSpecificSource('emergency:slate', config);
           }
         } else {
           await this._activateInitialPlayoutContent();

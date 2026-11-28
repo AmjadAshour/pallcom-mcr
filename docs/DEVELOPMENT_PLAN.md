@@ -78,3 +78,9 @@ Phase Two is approved for local account work. Phase One operational gates remain
 | 17. Phases 19 and 20 final acceptance | All functional and design gates | Qualify 72-hour run, resources, receiver/recovery budgets and security release. Require owner go/no-go. |
 
 Implementation details are in [MySQL migration](MYSQL_MIGRATION_PLAN.md), [channel architecture](MULTI_CHANNEL_ARCHITECTURE.md), [Linux deployment](DEPLOYMENT_PLAN.md), [updates](UPDATE_AND_ROLLBACK_PLAN.md) and [broadcast acceptance](BROADCAST_ACCEPTANCE_PLAN.md).
+
+## Phase Seven Status & Phase Eight Readiness Gate (2026-11-28)
+
+- **Phase Seven (`Professional Broadcast Scheduler`)** is locally implemented and verified across SQLite, local MariaDB (`10.4.32-MariaDB`), dual Full HD (`1920x1080 @ 25fps`) GStreamer workers, FFprobe/FFmpeg UDP receivers (with DFT audio frequency and RGB pixel verification), and headless Chromium (`scheduler-browser-loopback.js`).
+- **Open Production Gates:** Oracle MySQL 8.4 verification (`G48`), external Linux staging (`G1`–`G12`), and the actual 72-hour wall-clock simultaneous two-channel Full HD endurance test (`G-72H`) remain open.
+- **Next Phase in Approved Sequence:** **Phase Eight — Multi-Track Timeline Scheduler** (`MASTER_REQUIREMENTS.md` Section 13), which requires explicit owner authorization before implementation begins.

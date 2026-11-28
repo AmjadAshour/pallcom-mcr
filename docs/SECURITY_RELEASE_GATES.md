@@ -1,4 +1,4 @@
-# Security release gates
+﻿# Security release gates
 
 Production approval remains open. These gates extend [the Phase One ledger](PHASE_ONE_GATES.md) and retain its historical evidence.
 
@@ -23,7 +23,7 @@ Create per-environment replacements in an approved secret store. Rehearse encryp
 
 Attach sanitized validation of outcomes and revoke superseded credentials. Preserve historical evidence. Any production rotation, history rewriting or external audit requires its own authorization.
 
+## Phase Seven Security & Production Release Gate Status (2026-11-28)
 
-## Phase Seven - Broadcast Scheduler (2026-11-28)
-Implemented and verified locally (SQLite, local MariaDB 10.4.32 only; Oracle MySQL 8.4 gate G48 remains open). Evidence: `backend/test/broadcast-scheduler.test.js` (5 tests: DST, recurrence, validation, RBAC/draft/publish/concurrency/delete-protection, simulated 72-hour schedule), `backend/verification/two-channel-scheduler-acceptance.js` (two real 1920x1080@25 GStreamer channels, FFprobe/FFmpeg receivers, mid-movie ad resume at 5899 ms, camera failure/recovery, manual override, draft isolation, cross-channel isolation), `backend/verification/mysql-migration-rehearsal.js` (scheduler tables parity), full workspace suite 52/52 passing, frontend build passing.
-Not claimed: a real 72-hour wall-clock endurance run (open production gate); the 72-hour test is validation plus a deterministic clock simulation. Manual override currently sets state flags and pauses scheduled starts; it does not switch the live source itself. Production security gates remain open. Phase Eight not started.
+- **Locally Verified Phase Seven Controls:** Granular RBAC (`schedule:manage`, `schedule:publish`, `station:control`, `broadcast:emergency`), cross-organization/cross-channel reference rejection, bounded recurrence expansion, optimistic concurrency (`409`), durable CAS lease fencing (`409 STALE_SCHEDULER_OWNER`), write-ahead occurrence idempotency (`UNIQUE(occurrenceId)`), `SCHEDULED_PLAYBACK` deletion protection, and CSV formula injection neutralization.
+- **Open Production Gates Preserved:** External Linux staging (`G1`–`G12`), production credential rotation, container vulnerability scanning, Oracle MySQL 8.4 target verification (`G48` — local verification uses `10.4.32-MariaDB`), field OBS acceptance, external SMTP/TURN, real remote camera VPN connectivity, `>10 GB` media upload, and **actual 72-hour wall-clock simultaneous two-channel Full HD broadcast endurance (`G-72H`)** remain **OPEN**.

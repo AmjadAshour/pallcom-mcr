@@ -1,13 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button } from '@mcr/ui';
 import {
-  AlertTriangle,
   Calendar,
   CheckCircle2,
-  Clock,
+  ClipboardPaste,
   Copy,
-  FileText,
-  History,
   Layers,
   Pause,
   Play,
@@ -63,6 +60,24 @@ const GAP_POLICIES = [
 ];
 
 const RECURRENCE_FREQUENCIES = ['ONCE', 'DAILY', 'WEEKLY', 'SELECTED_WEEKDAYS'];
+const SNAP_MINUTES_OPTIONS = [1, 5, 15, 30, 60];
+
+function parseEventStartMs(ev, fallbackDate) {
+  if (ev.startUtc) {
+    const ms = Date.parse(ev.startUtc);
+    if (Number.isFinite(ms)) return ms;
+  }
+  if (ev.localStartDateTime) {
+    const ms = Date.parse(`${ev.localStartDateTime}Z`);
+    if (Number.isFinite(ms)) return ms;
+  }
+  return Date.parse(`${fallbackDate}T12:00:00Z`);
+}
+
+function snapToGridMs(rawMs, snapMinutes = 15) {
+  const stepMs = Math.max(1, Number(snapMinutes || 15)) * 60000;
+  return Math.round(rawMs / stepMs) * stepMs;
+}
 
 export function MultiTrackBroadcastScheduler({
   stationId,
@@ -81,6 +96,7 @@ export function MultiTrackBroadcastScheduler({
   const [viewMode, setViewMode] = useState('DAY'); // DAY | WEEK | AS_RUN | REVISIONS
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [zoomHours, setZoomHours] = useState(24);
+  const [snapMinutes, setSnapMinutes] = useState(15);
   const [draftEvents, setDraftEvents] = useState([]);
   const [timezone, setTimezone] = useState('UTC');
   const [activationPolicy, setActivationPolicy] = useState('APPLY_NEXT_BOUNDARY');
@@ -89,10 +105,16 @@ export function MultiTrackBroadcastScheduler({
   const [redoStack, setRedoStack] = useState([]);
   const [validationResult, setValidationResult] = useState(null);
   const [selectedEventId, setSelectedEventId] = useState(null);
+  const [selectedEventIds, setSelectedEventIds] = useState([]);
+  const [clipboardEvents, setClipboardEvents] = useState([]);
+  const [draggedPayload, setDraggedPayload] = useState(null);
+  const [manualOverrideSourceId, setManualOverrideSourceId] = useState('');
+  const [playheadClock, setPlayheadClock] = useState(() => new Date());
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [newExceptionDate, setNewExceptionDate] = useState('');
 
   const [newEventForm, setNewEventForm] = useState({
     title: '',
@@ -107,6 +129,11 @@ export function MultiTrackBroadcastScheduler({
     recurrenceFrequency: 'ONCE',
     weekdays: [0, 1, 2, 3, 4, 5, 6]
   });
+
+  useEffect(() => {
+    const timer = setInterval(() => setPlayheadClock(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const loadSchedulerState = useCallback(async () => {
     if (!stationId) return;
@@ -269,6 +296,7 @@ export function MultiTrackBroadcastScheduler({
     pushDraftChange([...draftEvents, newEv]);
     setShowAddModal(false);
     setSelectedEventId(id);
+    setSelectedEventIds([id]);
   };
 
   const handleDuplicateEvent = (ev) => {
@@ -280,20 +308,60 @@ export function MultiTrackBroadcastScheduler({
     };
     pushDraftChange([...draftEvents, duplicated]);
     setSelectedEventId(copyId);
+    setSelectedEventIds([copyId]);
+  };
+
+  const handleCopySelected = () => {
+    const ids = selectedEventIds.length ? selectedEventIds : (selectedEventId ? [selectedEventId] : []);
+    const toCopy = draftEvents.filter(e => ids.includes(e.id));
+    if (!toCopy.length) return;
+    setClipboardEvents(toCopy);
+    setStatusMessage(isAr ? `تم نسخ ${toCopy.length} عنصر إلى الحافظة` : `Copied ${toCopy.length} event(s) to clipboard`);
+  };
+
+  const handlePasteClipboard = (targetTrackId = null) => {
+    if (!clipboardEvents.length) return;
+    const pasted = clipboardEvents.map((ev, idx) => {
+      const baseMs = parseEventStartMs(ev, selectedDate);
+      const snappedMs = snapToGridMs(baseMs + (idx + 1) * snapMinutes * 60000, snapMinutes);
+      const iso = new Date(snappedMs).toISOString();
+      return {
+        ...ev,
+        id: `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}-${idx}`,
+        trackType: targetTrackId || ev.trackType,
+        title: `${ev.title} (Pasted)`,
+        startUtc: iso,
+        localStartDateTime: iso.slice(0, 19)
+      };
+    });
+    pushDraftChange([...draftEvents, ...pasted]);
+    setSelectedEventId(pasted[0].id);
+    setSelectedEventIds(pasted.map(p => p.id));
+    setStatusMessage(isAr ? `تم لصق ${pasted.length} عنصر` : `Pasted ${pasted.length} event(s)`);
   };
 
   const handleDeleteEvent = (eventId) => {
     pushDraftChange(draftEvents.filter(e => e.id !== eventId));
     if (selectedEventId === eventId) setSelectedEventId(null);
+    setSelectedEventIds(prev => prev.filter(id => id !== eventId));
+  };
+
+  const handleDeleteSelected = () => {
+    const ids = new Set(selectedEventIds.length ? selectedEventIds : (selectedEventId ? [selectedEventId] : []));
+    if (!ids.size) return;
+    pushDraftChange(draftEvents.filter(e => !ids.has(e.id)));
+    setSelectedEventId(null);
+    setSelectedEventIds([]);
   };
 
   const handleNudgeEventMinutes = (eventId, deltaMinutes) => {
+    const stepMinutes = deltaMinutes === 0 ? snapMinutes : deltaMinutes;
     pushDraftChange(
       draftEvents.map(ev => {
         if (ev.id !== eventId) return ev;
-        const baseMs = ev.startUtc ? Date.parse(ev.startUtc) : Date.parse(`${ev.localStartDateTime || `${selectedDate}T12:00:00`}Z`);
-        if (!Number.isFinite(baseMs)) return ev;
-        const shiftedIso = new Date(baseMs + deltaMinutes * 60000).toISOString();
+        const baseMs = parseEventStartMs(ev, selectedDate);
+        const shiftedMs = snapToGridMs(baseMs + stepMinutes * 60000, snapMinutes);
+        const shiftedIso = new Date(shiftedMs).toISOString();
         return {
           ...ev,
           startUtc: shiftedIso,
@@ -301,6 +369,69 @@ export function MultiTrackBroadcastScheduler({
         };
       })
     );
+  };
+
+  const handleResizeEventMinutes = (eventId, deltaMinutes) => {
+    pushDraftChange(
+      draftEvents.map(ev => {
+        if (ev.id !== eventId) return ev;
+        const nextDurMs = Math.max(60000, (Number(ev.durationMs) || 600000) + deltaMinutes * 60000);
+        return {
+          ...ev,
+          durationMs: nextDurMs
+        };
+      })
+    );
+  };
+
+  const handleDropOnTrack = (targetTrackId, dropHourOffset = null) => {
+    if (!draggedPayload || !canManageSchedule) return;
+    if (draggedPayload.kind === 'EXISTING_EVENT') {
+      pushDraftChange(
+        draftEvents.map(ev => {
+          if (ev.id !== draggedPayload.eventId) return ev;
+          let nextStartUtc = ev.startUtc;
+          let nextLocal = ev.localStartDateTime;
+          if (dropHourOffset !== null) {
+            const dayStartMs = Date.parse(`${selectedDate}T00:00:00.000Z`);
+            const snapped = snapToGridMs(dayStartMs + dropHourOffset * 3600000, snapMinutes);
+            nextStartUtc = new Date(snapped).toISOString();
+            nextLocal = nextStartUtc.slice(0, 19);
+          }
+          return {
+            ...ev,
+            trackType: targetTrackId,
+            startUtc: nextStartUtc,
+            localStartDateTime: nextLocal
+          };
+        })
+      );
+    } else if (draggedPayload.kind === 'PALETTE_ITEM') {
+      const id = `ev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+      const dayStartMs = Date.parse(`${selectedDate}T00:00:00.000Z`);
+      const snapped = snapToGridMs(dayStartMs + (dropHourOffset ?? 12) * 3600000, snapMinutes);
+      const iso = new Date(snapped).toISOString();
+      const created = {
+        id,
+        trackType: targetTrackId,
+        executionMode: targetTrackId === 'ADVERTISEMENTS' ? 'FIXED_DURATION' : 'HARD_START',
+        title: draggedPayload.title,
+        startUtc: iso,
+        localStartDateTime: iso.slice(0, 19),
+        durationMs: draggedPayload.durationMs || 1800000,
+        priority: targetTrackId === 'ADVERTISEMENTS' ? 90 : 60,
+        mediaAssetId: draggedPayload.mediaAssetId || null,
+        videoSourceId: draggedPayload.videoSourceId || null,
+        audioSourceId: draggedPayload.audioSourceId || null,
+        recurrence: { frequency: 'ONCE', weekdays: [0, 1, 2, 3, 4, 5, 6], exceptionDates: [] },
+        enabled: true,
+        metadata: {}
+      };
+      pushDraftChange([...draftEvents, created]);
+      setSelectedEventId(id);
+      setSelectedEventIds([id]);
+    }
+    setDraggedPayload(null);
   };
 
   const handleRestoreRevision = async (revId) => {
@@ -322,9 +453,23 @@ export function MultiTrackBroadcastScheduler({
   const publishedRev = schedulerData.published;
   const draftRev = schedulerData.draft;
   const selectedEvent = draftEvents.find(e => e.id === selectedEventId) || null;
+  const advertisementAssets = mediaAssets.filter(a => a.category === 'ADVERTISEMENTS' || a.category === 'PROMOS');
+
+  // Compute live playhead percentage across the 24h day ruler
+  const playheadMinutes = playheadClock.getUTCHours() * 60 + playheadClock.getUTCMinutes();
+  const playheadPercent = Math.min(100, Math.max(0, (playheadMinutes / (24 * 60)) * 100));
+  const rulerHours = Array.from({ length: Math.min(24, Math.max(4, zoomHours)) }, (_, i) => i);
+  const weekDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(Date.parse(`${selectedDate}T00:00:00Z`) + i * 86400000);
+    return d.toISOString().slice(0, 10);
+  });
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/90 p-4 space-y-4">
+    <div
+      dir={isAr ? 'rtl' : 'ltr'}
+      data-testid="multitrack-broadcast-scheduler"
+      className="rounded-lg border border-zinc-800 bg-zinc-900/90 p-4 space-y-4"
+    >
       {/* Top Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-3">
         <div className="flex items-center gap-2.5">
@@ -334,11 +479,11 @@ export function MultiTrackBroadcastScheduler({
               <h2 className="text-xs font-mono font-bold uppercase text-white">
                 {isAr ? 'جدولة البث الاحترافية والخط الزمني متعدد المسارات (7 مسارات)' : 'Professional Multi-Track Broadcast Scheduler & Timeline (7 Tracks)'}
               </h2>
-              <span className="rounded bg-zinc-800 border border-zinc-700 px-2 py-0.5 text-[10px] font-mono text-cyan-300">
+              <span data-testid="draft-revision-badge" className="rounded bg-zinc-800 border border-zinc-700 px-2 py-0.5 text-[10px] font-mono text-cyan-300">
                 Draft v{draftRev?.revisionNumber ?? 1} ({draftRev?.lifecycleState || 'DRAFT'})
               </span>
               {publishedRev && (
-                <span className="rounded bg-emerald-950 border border-emerald-700/50 px-2 py-0.5 text-[10px] font-mono text-emerald-300">
+                <span data-testid="published-revision-badge" className="rounded bg-emerald-950 border border-emerald-700/50 px-2 py-0.5 text-[10px] font-mono text-emerald-300">
                   Published v{publishedRev.revisionNumber}
                 </span>
               )}
@@ -354,6 +499,7 @@ export function MultiTrackBroadcastScheduler({
         <div className="flex flex-wrap items-center gap-1.5">
           <input
             type="date"
+            aria-label={isAr ? 'تاريخ الجدول' : 'Schedule Date'}
             value={selectedDate}
             onChange={(e) => setSelectedDate(e.target.value)}
             className="bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-xs font-mono text-white"
@@ -379,6 +525,20 @@ export function MultiTrackBroadcastScheduler({
 
           {canManageSchedule && (
             <>
+              <Button variant="outline" size="sm" onClick={handleCopySelected} disabled={!selectedEventId && !selectedEventIds.length} title="Copy Selected">
+                <Copy className="w-3.5 h-3.5 me-1" />
+                {isAr ? 'نسخ' : 'Copy'}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => handlePasteClipboard()} disabled={!clipboardEvents.length} title="Paste">
+                <ClipboardPaste className="w-3.5 h-3.5 me-1" />
+                {isAr ? 'لصق' : 'Paste'} ({clipboardEvents.length})
+              </Button>
+              {selectedEventIds.length > 1 && (
+                <Button variant="outline" size="sm" onClick={handleDeleteSelected}>
+                  <Trash2 className="w-3.5 h-3.5 me-1 text-red-400" />
+                  {isAr ? `حذف المحدد (${selectedEventIds.length})` : `Delete Selected (${selectedEventIds.length})`}
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={() => setShowAddModal(true)}>
                 <Plus className="w-3.5 h-3.5 me-1" />
                 {isAr ? 'إضافة حدث' : 'Add Event'}
@@ -407,19 +567,19 @@ export function MultiTrackBroadcastScheduler({
       </div>
 
       {errorMessage && (
-        <div className="rounded border border-red-500/40 bg-red-950/30 px-3 py-2 text-xs font-mono text-red-300">
+        <div role="alert" className="rounded border border-red-500/40 bg-red-950/30 px-3 py-2 text-xs font-mono text-red-300">
           {errorMessage}
         </div>
       )}
       {statusMessage && (
-        <div className="rounded border border-cyan-500/40 bg-cyan-950/30 px-3 py-2 text-xs font-mono text-cyan-200">
+        <div role="status" className="rounded border border-cyan-500/40 bg-cyan-950/30 px-3 py-2 text-xs font-mono text-cyan-200">
           {statusMessage}
         </div>
       )}
 
       {/* Validation & Gap Alerts */}
       {validationResult && (
-        <div className="rounded border border-zinc-800 bg-zinc-950 p-3 space-y-2 text-xs font-mono">
+        <div data-testid="validation-result-banner" className="rounded border border-zinc-800 bg-zinc-950 p-3 space-y-2 text-xs font-mono">
           <div className="flex items-center justify-between">
             <span className={validationResult.valid ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold'}>
               {validationResult.valid
@@ -449,7 +609,7 @@ export function MultiTrackBroadcastScheduler({
         </div>
       )}
 
-      {/* Live Execution & Override Bar */}
+      {/* Live Execution & Manual / Emergency Override Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs font-mono">
         <div className="flex flex-wrap items-center gap-3">
           <span>
@@ -459,6 +619,11 @@ export function MultiTrackBroadcastScheduler({
             </strong>
           </span>
           {execState.holdActive && <span className="rounded bg-amber-950 px-2 py-0.5 text-amber-300">HOLD ACTIVE</span>}
+          {execState.manualOverrideActive && (
+            <span className="rounded bg-cyan-950 px-2 py-0.5 text-cyan-300">
+              MANUAL OVERRIDE ({execState.overrideSourceId})
+            </span>
+          )}
           {execState.emergencyOverrideActive && <span className="rounded bg-red-950 px-2 py-0.5 text-red-300">EMERGENCY OVERRIDE</span>}
           <span className="text-zinc-400">
             {isAr ? 'الفيديو النشط:' : 'Active Video:'}{' '}
@@ -473,6 +638,28 @@ export function MultiTrackBroadcastScheduler({
         <div className="flex flex-wrap items-center gap-1.5">
           {canControlStation && (
             <>
+              <select
+                aria-label={isAr ? 'مصدر التجاوز اليدوي' : 'Manual Override Source'}
+                value={manualOverrideSourceId}
+                onChange={(e) => setManualOverrideSourceId(e.target.value)}
+                className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-[11px] text-white"
+              >
+                <option value="">{isAr ? '-- اختر مصدر تجاوز يدوي --' : '-- Manual Override Source --'}</option>
+                {videoSources.map((vs) => (
+                  <option key={vs.id} value={vs.id}>[Camera/Source] {vs.name}</option>
+                ))}
+                {mediaAssets.map((ma) => (
+                  <option key={ma.id} value={ma.id}>[Media] {ma.title}</option>
+                ))}
+              </select>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!manualOverrideSourceId}
+                onClick={() => void handleControlAction('MANUAL_SOURCE_OVERRIDE', { overrideSourceId: manualOverrideSourceId })}
+              >
+                {isAr ? 'تبديل يدوي مباشر' : 'Manual Override'}
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -521,12 +708,13 @@ export function MultiTrackBroadcastScheduler({
         </div>
       </div>
 
-      {/* Policy & Timezone Configuration Row */}
+      {/* Policy, Timezone, Snap Grid & Zoom Row */}
       {canManageSchedule && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs font-mono">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3 text-xs font-mono">
           <div>
             <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'المنطقة الزمنية (IANA)' : 'Channel Timezone (IANA)'}</label>
             <select
+              aria-label="Channel Timezone"
               value={timezone}
               onChange={(e) => setTimezone(e.target.value)}
               className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-white"
@@ -543,6 +731,7 @@ export function MultiTrackBroadcastScheduler({
           <div>
             <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'سياسة تفعيل الجدول المنشور' : 'Live Publication Policy'}</label>
             <select
+              aria-label="Live Publication Policy"
               value={activationPolicy}
               onChange={(e) => setActivationPolicy(e.target.value)}
               className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-white"
@@ -555,12 +744,26 @@ export function MultiTrackBroadcastScheduler({
           <div>
             <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'سياسة ملء الفراغات' : 'Unscheduled Gap Policy'}</label>
             <select
+              aria-label="Unscheduled Gap Policy"
               value={gapPolicy}
               onChange={(e) => setGapPolicy(e.target.value)}
               className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-white"
             >
               {GAP_POLICIES.map((g) => (
                 <option key={g} value={g}>{g}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'المحاذاة للشبكة الزمنية (Snap Grid)' : 'Time-Grid Snapping'}</label>
+            <select
+              aria-label="Time-Grid Snapping"
+              value={snapMinutes}
+              onChange={(e) => setSnapMinutes(Number(e.target.value))}
+              className="w-full bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-white"
+            >
+              {SNAP_MINUTES_OPTIONS.map((m) => (
+                <option key={m} value={m}>{m} min</option>
               ))}
             </select>
           </div>
@@ -577,15 +780,132 @@ export function MultiTrackBroadcastScheduler({
         </div>
       )}
 
-      {/* Main View Body: 7-Track Timeline OR As-Run History OR Revision History */}
+      {/* Drag-and-Drop Source Palette */}
+      {canManageSchedule && (viewMode === 'DAY' || viewMode === 'WEEK') && (
+        <div className="rounded border border-zinc-800 bg-zinc-950 p-2.5 text-xs font-mono">
+          <div className="text-[10px] text-zinc-400 mb-1.5">
+            {isAr
+              ? 'اسحب وأفلت ملفات الوسائط أو الكاميرات أو الإعلانات مباشرة على أي مسار في الخط الزمني:'
+              : 'Drag & Drop Media, Live Cameras, Audio Sources, or Advertisements onto any timeline track:'}
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {mediaAssets.slice(0, 8).map((ma) => (
+              <div
+                key={`pal-m-${ma.id}`}
+                draggable
+                onDragStart={() =>
+                  setDraggedPayload({
+                    kind: 'PALETTE_ITEM',
+                    title: ma.title,
+                    mediaAssetId: ma.id,
+                    durationMs: Math.max(60000, Number(ma.durationSeconds || 1800) * 1000)
+                  })
+                }
+                className="shrink-0 cursor-grab rounded border border-cyan-700/50 bg-cyan-950/30 px-2 py-1 text-[11px] text-cyan-200"
+              >
+                🎬 {ma.title}
+              </div>
+            ))}
+            {videoSources.slice(0, 6).map((vs) => (
+              <div
+                key={`pal-v-${vs.id}`}
+                draggable
+                onDragStart={() =>
+                  setDraggedPayload({
+                    kind: 'PALETTE_ITEM',
+                    title: vs.name,
+                    videoSourceId: vs.id,
+                    durationMs: 1800000
+                  })
+                }
+                className="shrink-0 cursor-grab rounded border border-emerald-700/50 bg-emerald-950/30 px-2 py-1 text-[11px] text-emerald-200"
+              >
+                📹 {vs.name}
+              </div>
+            ))}
+            {audioSources.slice(0, 6).map((as) => (
+              <div
+                key={`pal-a-${as.id}`}
+                draggable
+                onDragStart={() =>
+                  setDraggedPayload({
+                    kind: 'PALETTE_ITEM',
+                    title: as.name,
+                    audioSourceId: as.id,
+                    durationMs: 3600000
+                  })
+                }
+                className="shrink-0 cursor-grab rounded border border-violet-700/50 bg-violet-950/30 px-2 py-1 text-[11px] text-violet-200"
+              >
+                🎵 {as.name}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Main View Body: 24h Time Ruler + Live Playhead + 7-Track Timeline */}
       {(viewMode === 'DAY' || viewMode === 'WEEK') && (
-        <div className="space-y-2">
+        <div className="space-y-2 relative">
+          {/* 24-Hour Broadcast Time Ruler & Current-Time Live Playhead */}
+          <div data-testid="timeline-time-ruler" className="relative rounded border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[10px] text-zinc-400 overflow-x-auto">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-cyan-300 font-bold">
+                {isAr ? 'مسطرة الوقت الفعلي للبث ومؤشر التشغيل الحي (Live Playhead):' : 'Broadcast Time Scale & Current-Time Live Playhead:'}{' '}
+                {playheadClock.toISOString().slice(11, 19)} UTC
+              </span>
+              <span>
+                {viewMode === 'WEEK' ? `7-Day Week Grid (${weekDays[0]} → ${weekDays[6]})` : `24h Zoom Window (${zoomHours}h) · Snap ${snapMinutes}m`}
+              </span>
+            </div>
+            {viewMode === 'WEEK' ? (
+              <div data-testid="week-view-grid" className="grid grid-cols-7 gap-1 pt-1 border-t border-zinc-800">
+                {weekDays.map((dayStr) => {
+                  const count = (schedulerData.expandedOccurrences || []).filter(o => o.localDate === dayStr || (o.plannedStartUtc || '').startsWith(dayStr)).length;
+                  return (
+                    <button
+                      type="button"
+                      key={dayStr}
+                      onClick={() => { setSelectedDate(dayStr); setViewMode('DAY'); }}
+                      className={`rounded border px-2 py-1 text-left ${
+                        dayStr === selectedDate ? 'border-cyan-500 bg-cyan-950/40 text-white' : 'border-zinc-800 bg-zinc-900 text-zinc-300'
+                      }`}
+                    >
+                      <div className="font-bold">{dayStr}</div>
+                      <div className="text-[9px] text-cyan-300">{count} occurrences</div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="relative flex justify-between border-t border-zinc-800 pt-1">
+                {rulerHours.map((h) => (
+                  <span key={h} className="shrink-0">
+                    {String(h).padStart(2, '0')}:00
+                  </span>
+                ))}
+                <div
+                  data-testid="live-playhead-indicator"
+                  style={{ left: `${playheadPercent}%` }}
+                  className="pointer-events-none absolute top-0 bottom-0 w-0.5 bg-red-500"
+                  title={`Current Playhead ${playheadClock.toISOString()}`}
+                />
+              </div>
+            )}
+          </div>
+
           {TRACK_DEFINITIONS.map((track) => {
             const trackEvents = draftEvents.filter(e => e.trackType === track.id);
             const activeOnTrack = execState.currentTrackStates?.[track.id];
 
             return (
-              <div key={track.id} className="rounded border border-zinc-800 bg-zinc-950 p-2.5">
+              <div
+                key={track.id}
+                data-testid={`timeline-track-${track.id}`}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={() => handleDropOnTrack(track.id)}
+                className="rounded border border-zinc-800 bg-zinc-950 p-2.5"
+              >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     <Layers className="w-3.5 h-3.5 text-cyan-400" />
@@ -594,75 +914,146 @@ export function MultiTrackBroadcastScheduler({
                     </span>
                     <span className="text-[10px] font-mono text-zinc-500">({trackEvents.length})</span>
                   </div>
-                  {activeOnTrack && (
-                    <span className="rounded bg-emerald-950 border border-emerald-600/40 px-2 py-0.5 text-[10px] font-mono text-emerald-300">
-                      ON AIR: {activeOnTrack.title}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {canManageSchedule && clipboardEvents.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handlePasteClipboard(track.id)}
+                        className="rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] font-mono text-cyan-300 hover:border-cyan-500"
+                      >
+                        {isAr ? 'لصق هنا' : 'Paste Here'}
+                      </button>
+                    )}
+                    {activeOnTrack && (
+                      <span className="rounded bg-emerald-950 border border-emerald-600/40 px-2 py-0.5 text-[10px] font-mono text-emerald-300">
+                        ON AIR: {activeOnTrack.title}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex gap-2 overflow-x-auto pb-1">
                   {trackEvents.length === 0 ? (
                     <span className="text-[11px] font-mono text-zinc-600 py-2">
-                      {isAr ? 'لا توجد أحداث مجدولة على هذا المسار' : 'No events scheduled on this track'}
+                      {isAr ? 'لا توجد أحداث مجدولة على هذا المسار (اسحب عنصرًا هنا)' : 'No events scheduled on this track (drag items here)'}
                     </span>
                   ) : (
-                    trackEvents.map((ev) => (
-                      <div
-                        key={ev.id}
-                        onClick={() => setSelectedEventId(ev.id)}
-                        className={`min-w-[230px] max-w-[300px] shrink-0 cursor-pointer rounded border p-2 font-mono text-xs transition-all ${
-                          track.color
-                        } ${selectedEventId === ev.id ? 'ring-2 ring-white' : ''}`}
-                      >
-                        <div className="flex items-center justify-between text-[10px] opacity-80 mb-1">
-                          <span>{ev.executionMode}</span>
-                          <span>{ev.recurrence?.frequency || 'ONCE'}</span>
-                        </div>
-                        <div className="font-bold truncate text-white" title={ev.title}>
-                          {ev.title}
-                        </div>
-                        <div className="text-[10px] opacity-90 mt-1">
-                          {ev.localStartDateTime || ev.startUtc || 'Chained'} · {Math.round((ev.durationMs || 0) / 60000)}m
-                        </div>
-                        {canManageSchedule && (
-                          <div className="flex items-center justify-between gap-1 mt-2 pt-1 border-t border-white/10">
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleNudgeEventMinutes(ev.id, -15); }}
-                              className="px-1.5 py-0.5 rounded bg-black/40 hover:bg-black/70 text-[10px]"
-                              title="Move -15 min (Keyboard accessible)"
-                            >
-                              -15m
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleNudgeEventMinutes(ev.id, 15); }}
-                              className="px-1.5 py-0.5 rounded bg-black/40 hover:bg-black/70 text-[10px]"
-                              title="Move +15 min (Keyboard accessible)"
-                            >
-                              +15m
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleDuplicateEvent(ev); }}
-                              className="px-1.5 py-0.5 rounded bg-black/40 hover:bg-black/70 text-[10px]"
-                              title="Duplicate Event"
-                            >
-                              <Copy className="w-3 h-3" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={(e) => { e.stopPropagation(); handleDeleteEvent(ev.id); }}
-                              className="px-1.5 py-0.5 rounded bg-red-950/60 hover:bg-red-900 text-red-200 text-[10px]"
-                              title="Delete Event"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
+                    trackEvents.map((ev) => {
+                      const isMultiSelected = selectedEventIds.includes(ev.id);
+                      const hasConflict = (validationResult?.errors || []).some(err => (err.eventIds || []).includes(ev.id));
+                      return (
+                        <div
+                          key={ev.id}
+                          data-testid={`timeline-event-${ev.id}`}
+                          draggable={canManageSchedule}
+                          onDragStart={() => setDraggedPayload({ kind: 'EXISTING_EVENT', eventId: ev.id })}
+                          onClick={(e) => {
+                            setSelectedEventId(ev.id);
+                            if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                              setSelectedEventIds(prev => (prev.includes(ev.id) ? prev.filter(id => id !== ev.id) : [...prev, ev.id]));
+                            } else {
+                              setSelectedEventIds([ev.id]);
+                            }
+                          }}
+                          className={`min-w-[250px] max-w-[330px] shrink-0 cursor-pointer rounded border p-2 font-mono text-xs transition-all ${
+                            track.color
+                          } ${selectedEventId === ev.id || isMultiSelected ? 'ring-2 ring-white' : ''} ${
+                            hasConflict ? 'border-red-500 ring-2 ring-red-500/70' : ''
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-[10px] opacity-80 mb-1">
+                            <label className="flex items-center gap-1 cursor-pointer" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${ev.title}`}
+                                checked={isMultiSelected}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedEventIds(prev => [...new Set([...prev, ev.id])]);
+                                    setSelectedEventId(ev.id);
+                                  } else {
+                                    setSelectedEventIds(prev => prev.filter(id => id !== ev.id));
+                                  }
+                                }}
+                              />
+                              <span>{ev.executionMode}</span>
+                            </label>
+                            <span>{ev.recurrence?.frequency || 'ONCE'}</span>
                           </div>
-                        )}
-                      </div>
-                    ))
+                          <div className="font-bold truncate text-white" title={ev.title}>
+                            {hasConflict ? '⚠ ' : ''}{ev.title}
+                          </div>
+                          <div className="text-[10px] opacity-90 mt-1">
+                            {ev.localStartDateTime || ev.startUtc || 'Chained'} · {Math.round((ev.durationMs || 0) / 60000)}m
+                          </div>
+                          {canManageSchedule && (
+                            <div className="flex flex-wrap items-center justify-between gap-1 mt-2 pt-1 border-t border-white/10">
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleNudgeEventMinutes(ev.id, -snapMinutes); }}
+                                className="px-1.5 py-0.5 rounded bg-black/40 hover:bg-black/70 text-[10px]"
+                                title={`Move -${snapMinutes}m (Keyboard accessible)`}
+                              >
+                                -{snapMinutes}m
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleNudgeEventMinutes(ev.id, snapMinutes); }}
+                                className="px-1.5 py-0.5 rounded bg-black/40 hover:bg-black/70 text-[10px]"
+                                title={`Move +${snapMinutes}m (Keyboard accessible)`}
+                              >
+                                +{snapMinutes}m
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleResizeEventMinutes(ev.id, -snapMinutes); }}
+                                className="px-1.5 py-0.5 rounded bg-black/40 hover:bg-black/70 text-[10px]"
+                                title={`Shrink duration -${snapMinutes}m`}
+                              >
+                                Dur-
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleResizeEventMinutes(ev.id, snapMinutes); }}
+                                className="px-1.5 py-0.5 rounded bg-black/40 hover:bg-black/70 text-[10px]"
+                                title={`Extend duration +${snapMinutes}m`}
+                              >
+                                Dur+
+                              </button>
+                              {ev.executionMode === 'MANUAL_TRIGGER' && canControlStation && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void handleControlAction('MANUAL_TRIGGER_EVENT', { eventId: ev.id, trackType: ev.trackType });
+                                  }}
+                                  className="px-1.5 py-0.5 rounded bg-emerald-900/70 hover:bg-emerald-800 text-emerald-100 text-[10px]"
+                                  title="Trigger Manual Event Now"
+                                >
+                                  Trigger
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleDuplicateEvent(ev); }}
+                                className="px-1.5 py-0.5 rounded bg-black/40 hover:bg-black/70 text-[10px]"
+                                title="Duplicate Event"
+                              >
+                                <Copy className="w-3 h-3" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleDeleteEvent(ev.id); }}
+                                className="px-1.5 py-0.5 rounded bg-red-950/60 hover:bg-red-900 text-red-200 text-[10px]"
+                                title="Delete Event"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -732,9 +1123,9 @@ export function MultiTrackBroadcastScheduler({
         </div>
       )}
 
-      {/* Selected Event Inspector */}
+      {/* Selected Event Inspector (Direct Start, End Time, Duration, Track, Sources, and Recurrence Editing) */}
       {selectedEvent && canManageSchedule && (
-        <div className="rounded border border-cyan-500/40 bg-zinc-950 p-3 space-y-2 text-xs font-mono">
+        <div data-testid="selected-event-inspector" className="rounded border border-cyan-500/40 bg-zinc-950 p-3 space-y-3 text-xs font-mono">
           <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
             <strong className="text-cyan-300">
               {isAr ? 'خصائص الحدث المحدد:' : 'Selected Event Properties:'} {selectedEvent.title}
@@ -743,10 +1134,11 @@ export function MultiTrackBroadcastScheduler({
               ✕
             </button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
             <div>
               <label className="block text-[10px] text-zinc-400">Title</label>
               <input
+                aria-label="Selected Event Title"
                 type="text"
                 value={selectedEvent.title}
                 onChange={(e) =>
@@ -756,8 +1148,24 @@ export function MultiTrackBroadcastScheduler({
               />
             </div>
             <div>
+              <label className="block text-[10px] text-zinc-400">Track (Move Track)</label>
+              <select
+                aria-label="Selected Event Track"
+                value={selectedEvent.trackType}
+                onChange={(e) =>
+                  pushDraftChange(draftEvents.map(ev => (ev.id === selectedEvent.id ? { ...ev, trackType: e.target.value } : ev)))
+                }
+                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-white"
+              >
+                {TRACK_DEFINITIONS.map((tr) => (
+                  <option key={tr.id} value={tr.id}>{tr.id}</option>
+                ))}
+              </select>
+            </div>
+            <div>
               <label className="block text-[10px] text-zinc-400">Execution Mode</label>
               <select
+                aria-label="Selected Event Execution Mode"
                 value={selectedEvent.executionMode}
                 onChange={(e) =>
                   pushDraftChange(draftEvents.map(ev => (ev.id === selectedEvent.id ? { ...ev, executionMode: e.target.value } : ev)))
@@ -770,10 +1178,11 @@ export function MultiTrackBroadcastScheduler({
               </select>
             </div>
             <div>
-              <label className="block text-[10px] text-zinc-400">Local Start Date/Time</label>
+              <label className="block text-[10px] text-zinc-400">Start Date/Time</label>
               <input
+                aria-label="Selected Event Start Time"
                 type="text"
-                value={selectedEvent.localStartDateTime || ''}
+                value={selectedEvent.localStartDateTime || (selectedEvent.startUtc ? selectedEvent.startUtc.slice(0, 19) : '')}
                 onChange={(e) =>
                   pushDraftChange(
                     draftEvents.map(ev =>
@@ -785,20 +1194,165 @@ export function MultiTrackBroadcastScheduler({
               />
             </div>
             <div>
+              <label className="block text-[10px] text-zinc-400">End Date/Time (Direct)</label>
+              <input
+                aria-label="Selected Event End Time"
+                type="text"
+                value={
+                  selectedEvent.endUtc
+                    ? selectedEvent.endUtc.slice(0, 19)
+                    : new Date(parseEventStartMs(selectedEvent, selectedDate) + Number(selectedEvent.durationMs || 600000))
+                        .toISOString()
+                        .slice(0, 19)
+                }
+                onChange={(e) => {
+                  const endVal = e.target.value;
+                  const startMs = parseEventStartMs(selectedEvent, selectedDate);
+                  const endMs = Date.parse(`${endVal}Z`);
+                  const computedDur = Number.isFinite(endMs) && endMs > startMs ? endMs - startMs : selectedEvent.durationMs;
+                  pushDraftChange(
+                    draftEvents.map(ev =>
+                      ev.id === selectedEvent.id
+                        ? { ...ev, endUtc: `${endVal}Z`, durationMs: Math.max(1000, computedDur) }
+                        : ev
+                    )
+                  );
+                }}
+                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-white"
+              />
+            </div>
+            <div>
               <label className="block text-[10px] text-zinc-400">Duration (seconds)</label>
               <input
+                aria-label="Selected Event Duration Seconds"
                 type="number"
                 min="1"
                 value={Math.round((selectedEvent.durationMs || 60000) / 1000)}
                 onChange={(e) =>
                   pushDraftChange(
                     draftEvents.map(ev =>
-                      ev.id === selectedEvent.id ? { ...ev, durationMs: Math.max(1000, Number(e.target.value) * 1000) } : ev
+                      ev.id === selectedEvent.id ? { ...ev, durationMs: Math.max(1000, Number(e.target.value) * 1000), endUtc: null } : ev
                     )
                   )
                 }
                 className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-white"
               />
+            </div>
+          </div>
+
+          {/* Source & Recurrence Editing Row in Inspector */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 pt-2 border-t border-zinc-800">
+            <div>
+              <label className="block text-[10px] text-zinc-400">Media / Advertisement Asset</label>
+              <select
+                aria-label="Selected Event Media Asset"
+                value={selectedEvent.mediaAssetId || ''}
+                onChange={(e) =>
+                  pushDraftChange(
+                    draftEvents.map(ev => (ev.id === selectedEvent.id ? { ...ev, mediaAssetId: e.target.value || null } : ev))
+                  )
+                }
+                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-white"
+              >
+                <option value="">-- None --</option>
+                {(selectedEvent.trackType === 'ADVERTISEMENTS' && advertisementAssets.length ? advertisementAssets : mediaAssets).map((m) => (
+                  <option key={m.id} value={m.id}>{m.title} ({m.category})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-400">Video / Camera Source</label>
+              <select
+                aria-label="Selected Event Video Source"
+                value={selectedEvent.videoSourceId || ''}
+                onChange={(e) =>
+                  pushDraftChange(
+                    draftEvents.map(ev => (ev.id === selectedEvent.id ? { ...ev, videoSourceId: e.target.value || null } : ev))
+                  )
+                }
+                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-white"
+              >
+                <option value="">-- None --</option>
+                {videoSources.map((vs) => (
+                  <option key={vs.id} value={vs.id}>{vs.name} ({vs.sourceType})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-400">Independent Audio Source</label>
+              <select
+                aria-label="Selected Event Audio Source"
+                value={selectedEvent.audioSourceId || ''}
+                onChange={(e) =>
+                  pushDraftChange(
+                    draftEvents.map(ev => (ev.id === selectedEvent.id ? { ...ev, audioSourceId: e.target.value || null } : ev))
+                  )
+                }
+                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-white"
+              >
+                <option value="">-- None --</option>
+                {audioSources.map((as) => (
+                  <option key={as.id} value={as.id}>{as.name} ({as.sourceType})</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] text-zinc-400">Recurrence Rule & Exceptions</label>
+              <div className="flex gap-1">
+                <select
+                  aria-label="Selected Event Recurrence Frequency"
+                  value={selectedEvent.recurrence?.frequency || 'ONCE'}
+                  onChange={(e) =>
+                    pushDraftChange(
+                      draftEvents.map(ev =>
+                        ev.id === selectedEvent.id
+                          ? { ...ev, recurrence: { ...(ev.recurrence || {}), frequency: e.target.value } }
+                          : ev
+                      )
+                    )
+                  }
+                  className="w-1/2 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-white"
+                >
+                  {RECURRENCE_FREQUENCIES.map((rf) => (
+                    <option key={rf} value={rf}>{rf}</option>
+                  ))}
+                </select>
+                <input
+                  type="date"
+                  aria-label="Add Exception Date"
+                  value={newExceptionDate}
+                  onChange={(e) => setNewExceptionDate(e.target.value)}
+                  className="w-1/3 rounded border border-zinc-700 bg-zinc-900 px-1 py-1 text-white text-[10px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!newExceptionDate) return;
+                    pushDraftChange(
+                      draftEvents.map(ev => {
+                        if (ev.id !== selectedEvent.id) return ev;
+                        const existing = ev.recurrence?.exceptionDates || [];
+                        return {
+                          ...ev,
+                          recurrence: {
+                            ...(ev.recurrence || { frequency: 'DAILY' }),
+                            exceptionDates: [...new Set([...existing, newExceptionDate])]
+                          }
+                        };
+                      })
+                    );
+                    setNewExceptionDate('');
+                  }}
+                  className="rounded border border-zinc-700 bg-zinc-800 px-1.5 text-[10px] text-cyan-300"
+                >
+                  +Exc
+                </button>
+              </div>
+              {(selectedEvent.recurrence?.exceptionDates || []).length > 0 && (
+                <div className="text-[10px] text-amber-300 mt-1">
+                  Exceptions: {(selectedEvent.recurrence.exceptionDates || []).join(', ')}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -823,6 +1377,7 @@ export function MultiTrackBroadcastScheduler({
             <div>
               <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'عنوان البرنامج / الحدث' : 'Event Title'}</label>
               <input
+                aria-label="New Event Title"
                 type="text"
                 required
                 value={newEventForm.title}
@@ -835,6 +1390,7 @@ export function MultiTrackBroadcastScheduler({
               <div>
                 <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'المسار (Track)' : 'Timeline Track'}</label>
                 <select
+                  aria-label="New Event Track"
                   value={newEventForm.trackType}
                   onChange={(e) => setNewEventForm({ ...newEventForm, trackType: e.target.value })}
                   className="w-full rounded border border-zinc-700 bg-zinc-950 px-2.5 py-1.5"
@@ -847,6 +1403,7 @@ export function MultiTrackBroadcastScheduler({
               <div>
                 <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'وضع التنفيذ' : 'Execution Mode'}</label>
                 <select
+                  aria-label="New Event Execution Mode"
                   value={newEventForm.executionMode}
                   onChange={(e) => setNewEventForm({ ...newEventForm, executionMode: e.target.value })}
                   className="w-full rounded border border-zinc-700 bg-zinc-950 px-2.5 py-1.5"
@@ -862,6 +1419,7 @@ export function MultiTrackBroadcastScheduler({
               <div>
                 <label className="block text-[10px] text-zinc-400 mb-1">Local Start (YYYY-MM-DDTHH:mm:ss)</label>
                 <input
+                  aria-label="New Event Local Start"
                   type="text"
                   required
                   value={newEventForm.localStartDateTime}
@@ -872,6 +1430,7 @@ export function MultiTrackBroadcastScheduler({
               <div>
                 <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'المدة (ثانية)' : 'Duration (sec)'}</label>
                 <input
+                  aria-label="New Event Duration"
                   type="number"
                   min="1"
                   required
@@ -883,6 +1442,7 @@ export function MultiTrackBroadcastScheduler({
               <div>
                 <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'التكرار' : 'Recurrence'}</label>
                 <select
+                  aria-label="New Event Recurrence"
                   value={newEventForm.recurrenceFrequency}
                   onChange={(e) => setNewEventForm({ ...newEventForm, recurrenceFrequency: e.target.value })}
                   className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5"
@@ -894,10 +1454,11 @@ export function MultiTrackBroadcastScheduler({
               </div>
             </div>
 
-            {['MAIN_VIDEO', 'ADVERTISEMENTS'].includes(newEventForm.trackType) && (
+            {newEventForm.trackType === 'MAIN_VIDEO' && (
               <div>
                 <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'ملف الوسائط من المكتبة' : 'Media Library Asset'}</label>
                 <select
+                  aria-label="New Event Media Asset"
                   value={newEventForm.mediaAssetId}
                   onChange={(e) => setNewEventForm({ ...newEventForm, mediaAssetId: e.target.value })}
                   className="w-full rounded border border-zinc-700 bg-zinc-950 px-2.5 py-1.5"
@@ -910,10 +1471,28 @@ export function MultiTrackBroadcastScheduler({
               </div>
             )}
 
+            {newEventForm.trackType === 'ADVERTISEMENTS' && (
+              <div>
+                <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'الإعلان التجاري' : 'Advertisement Spot'}</label>
+                <select
+                  aria-label="New Event Advertisement Asset"
+                  value={newEventForm.mediaAssetId}
+                  onChange={(e) => setNewEventForm({ ...newEventForm, mediaAssetId: e.target.value })}
+                  className="w-full rounded border border-zinc-700 bg-zinc-950 px-2.5 py-1.5"
+                >
+                  <option value="">-- Select Advertisement Asset --</option>
+                  {(advertisementAssets.length ? advertisementAssets : mediaAssets).map((m) => (
+                    <option key={m.id} value={m.id}>{m.title} ({m.category})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {newEventForm.trackType === 'LIVE_CAMERA_ROTATION' && (
               <div>
                 <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'مصدر الفيديو / الكاميرا' : 'Video Source'}</label>
                 <select
+                  aria-label="New Event Video Source"
                   value={newEventForm.videoSourceId}
                   onChange={(e) => setNewEventForm({ ...newEventForm, videoSourceId: e.target.value })}
                   className="w-full rounded border border-zinc-700 bg-zinc-950 px-2.5 py-1.5"
@@ -930,6 +1509,7 @@ export function MultiTrackBroadcastScheduler({
               <div>
                 <label className="block text-[10px] text-zinc-400 mb-1">{isAr ? 'مصدر الصوت المستقل' : 'Independent Audio Source'}</label>
                 <select
+                  aria-label="New Event Audio Source"
                   value={newEventForm.audioSourceId}
                   onChange={(e) => setNewEventForm({ ...newEventForm, audioSourceId: e.target.value })}
                   className="w-full rounded border border-zinc-700 bg-zinc-950 px-2.5 py-1.5"

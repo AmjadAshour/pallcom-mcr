@@ -1,12 +1,12 @@
-# Implementation progress
+﻿# Implementation progress
 
-2026-11-24. Phase 00 baseline and the initial phases 01–02 control-plane slice. All 20 pre-change tests passed against a temporary SQLite path. Existing README and Windows Agent worktree edits were noted before work. The development slice changes only the server Agent gateway, station status, tests and planning documents. No deployment was performed.
+2026-11-24. Phase 00 baseline and the initial phases 01â€“02 control-plane slice. All 20 pre-change tests passed against a temporary SQLite path. Existing README and Windows Agent worktree edits were noted before work. The development slice changes only the server Agent gateway, station status, tests and planning documents. No deployment was performed.
 
 The post-change suite passed 21 tests on Node.js 22. GATES:G1 passed simulated heartbeat loss, telemetry expiry/recovery, validation, and command backlog handling. GATES:G2 passed the authenticated Agent tunnel, cross-tenant checks, OBS acknowledgement simulation, and playout regressions. GATES:G3 records the manual documentation comparison.
 
 The first-slice security review found that Agent command result schemas, credential rotation/revocation, enrollment and MFA still need follow-up. No actual OBS output or broadcast continuity was measured. See the [task register](TASKS.md) and [acceptance gates](../GATES.md).
 
-## Continuation — P0-003A
+## Continuation â€” P0-003A
 
 Added scoped credential generations and revocation, old-socket disconnection, expiry, atomic pairing-code invalidation and audit logging. Legacy credentials continue until each station is rotated. Added the Settings action and updated the operational instructions.
 
@@ -14,35 +14,35 @@ Added scoped credential generations and revocation, old-socket disconnection, ex
 
 Next P0 task: split MFA enrollment/recovery from audit tamper resistance and start with MFA for privileged users. Keep Agent command-result schemas and a longer enrollment token tracked before enabling independent network-facing workers.
 
-## Monitoring and replay controls — Modules 21 and 08
+## Monitoring and replay controls â€” Modules 21 and 08
 
 Multiview displays averaged OBS stream bitrate from output byte and duration deltas and sampled peak dBFS per named OBS input. A reconnect, a stopped stream, or invalid counters clear the measured bitrate. Stale meter samples are omitted. Operators can start, stop, or save the configured OBS replay buffer through station-scoped, audited commands. OBS save events update the last-save timestamp without exposing a local file path.
 
 These controls require an updated station Agent. OBS must have Replay Buffer enabled in its Output settings. Clip playback, advanced replay editing, and a separate encoding worker remain pending. No live output settings were changed.
 
-## Operator-facing slice — Module 21
+## Operator-facing slice â€” Module 21
 
 Multiview now presents sortable station tiles, responsive column presets, Program and Preview snapshots, and fullscreen. Preferences are scoped to the dashboard user and organization in browser storage. The existing station-scoped snapshot endpoints remain the media source, with no new broadcast commands.
 
 `npm run build:web` passed. Local Chrome with synthetic station responses confirmed drag-and-drop, bus selection, preference persistence and fullscreen. Actual OBS output, measurement of capture latency, larger deployments, audio meters and independent encoded multiview remain unverified or unimplemented. Rollback is limited to the Multiview page and these documentation updates.
 
-## Independent Program initiative — Phase 1 audit
+## Independent Program initiative â€” Phase 1 audit
 
 The [implementation specification](INDEPENDENT_PROGRAM_SPEC.md) traces current signals, proposes service and timing contracts, and defines receiver acceptance gates. Four existing simulated playout and bitrate tests passed locally. Deployment identity and actual Program output remain unverified. Rollback consists of removing the specification and this progress entry.
 
-## Independent Program initiative — Phase 2
+## Independent Program initiative â€” Phase 2
 
 A single opt-in station can start and stop a separate GStreamer worker and select a loopback OBS contribution. A real portable OBS sender and an independent receiver exercised loss, fallback and manual return. A separate Chrome run captured output after closing the operator tab. See the [staging instructions, evidence and rollback](INDEPENDENT_PROGRAM_STAGING.md).
 
-## Independent Program initiative — Phase 4 watermark
+## Independent Program initiative â€” Phase 4 watermark
 
 Implemented against the Phase 2 worker and its 720p output profile. A clean image sampled before the watermark supplies the editor Preview. A revision-checked apply stores the station settings and emits the final overlay after source selection. The local receiver fixture checked a 2:1 uploaded image, inset, opacity, source changes, signal-loss fallback, disabling and restart. The Chrome check exercised pending edits and explicit apply. See the [staging runbook](INDEPENDENT_PROGRAM_STAGING.md) for reproduction and rollback.
 
-## Independent Program initiative — Phase 5 advertising
+## Independent Program initiative â€” Phase 5 advertising
 
 Added a station-scoped image/video library, four independent placement playlists and revision-checked Preview/Apply and live controls. The broadcast scheduler persists timing and override state in SQLite. Receiver testing exposed a one-frame overlap glitch at a lower placement's gap; keeping each placement in a stable layer fixed it. Clock tests cover scheduled eligibility, rotation, simultaneous starts, overrides, restart and DST. The local 720p25 receiver measured a 90-frame cycle (3.6 seconds), decoded the short video repeating, and confirmed the upper placement stayed visible. See the [staging procedure and rollback](INDEPENDENT_PROGRAM_STAGING.md).
 
-## Independent Program initiative — Phase 7 staging acceptance
+## Independent Program initiative â€” Phase 7 staging acceptance
 
 Full workflow acceptance failed on native scene composition and URL Preview/take. A combined local run exercised actual OBS, a separate picture/audio receiver, watermark, two ad placements, browser refresh, controlled service restart and fault recovery. Fixed RGB watermark opacity handling and added a regression. See the [scenario matrix, evidence and rollback](PHASE_7_ACCEPTANCE.md) and [operator quick guide](STAGING_OPERATOR_GUIDE.md).
 
@@ -68,7 +68,7 @@ Added opt-in sustained black detection for network contribution. Local receiver 
 
 Added opt-in frozen-picture detection on the network contribution. The receiver fixture verified fallback while the sender remained connected and manual retake once picture motion recovered. Roll back operationally with MCR_PROGRAM_FREEZE_SECONDS=0. See the staging runbook.
 
-Added opt-in silence detection for decoded contribution audio at −60 dBFS RMS. The loopback receiver fixture confirmed fallback while the sender remained connected, blocked Take during silence, and a manual retake after healthy audio returned. Roll back operationally with MCR_PROGRAM_SILENCE_SECONDS=0.
+Added opt-in silence detection for decoded contribution audio at âˆ’60 dBFS RMS. The loopback receiver fixture confirmed fallback while the sender remained connected, blocked Take during silence, and a manual retake after healthy audio returned. Roll back operationally with MCR_PROGRAM_SILENCE_SECONDS=0.
 
 The independent contribution reports input RMS in dBFS before Take. The loopback receiver fixture verified tone, silence, recovery and clearing on disconnect. The meter also runs when silence fallback is disabled.
 
@@ -78,7 +78,7 @@ Added session-scoped Program mute/unmute before encoding with station-control au
 
 Program now timestamps all PCM from a single sample counter. A bounded contribution queue supplies that clock, with silence on underrun. Receiver checks passed source loss, retake, mute and unmute without the previous backwards audio timestamp warnings. Local scene and recording checks also passed. Long-run A/V drift remains unmeasured.
 
-Added an audited Program attenuation control from −30 to 0 dB. Local receiver PCM verified a −12 dB change and restoration within the same session.
+Added an audited Program attenuation control from âˆ’30 to 0 dB. Local receiver PCM verified a âˆ’12 dB change and restoration within the same session.
 
 Added a station-scoped composed Program monitor. The local scene fixture verified image, watermark and ad in the monitor and in the independent UDP receiver. The monitor cleared on stop.
 
@@ -282,17 +282,17 @@ Phase One extended proxy verification to inspect login audit entries generated t
 
 Phase One added isolated TLS staging with Chromium, secure HTTP and WSS sessions and the real Agent CLI against simulated OBS. The backend now refuses unsupported storage modes instead of silently selecting SQLite, and the fixture expanded station read authorization coverage. Both builds and all 39 tests passed. Public proxy and privilege sign-off, real OBS, dependency advisories and credential cutover remain open. [Consolidated evidence](TEST_REPORT.md#phase-one-consolidated-local-staging-evidence) and [rollback](DEPLOYMENT.md#phase-one-local-staging).
 
-## 2026-11-27 — Post-audit Phase One
+## 2026-11-27 â€” Post-audit Phase One
 
-Baseline HEAD was `c3ab678307f2994f35dbb33f2e0a67efbbe237c3` with 89 pre-existing status entries. This checkpoint describes the working tree. Reproduce from an approved immutable snapshot before release. Current production targets and the proposed sequence are in the master requirements and development plan. [Tests](TEST_REPORT.md) · [Release gates](SECURITY_RELEASE_GATES.md)
+Baseline HEAD was `c3ab678307f2994f35dbb33f2e0a67efbbe237c3` with 89 pre-existing status entries. This checkpoint describes the working tree. Reproduce from an approved immutable snapshot before release. Current production targets and the proposed sequence are in the master requirements and development plan. [Tests](TEST_REPORT.md) آ· [Release gates](SECURITY_RELEASE_GATES.md)
 
 ## Phase Two local authentication and accounts
 
-Implemented self-service profile, password and session controls, scoped account creation, activation and role editing with administrator password reauthentication, inactive-account login-attempt audit monitoring (`LOGIN_FAILED` with generic 401 responses), optional TOTP with recovery codes, sidebar access to Account and Sessions (`/settings`) for all authenticated roles, bilingual Arabic/English Users & Permissions controls, and password recovery through a private loopback delivery contract. Both builds, all 43 workspace tests (including 14 non-viewer granular permission denial assertions), the SQLite rekey fixture, and the headless Chromium browser verification fixture (`account-browser-loopback.js`) passed. Delivery through an actual mail provider and deployed acceptance remain blocked on external mail transport configuration (`MCR_PASSWORD_RESET_DELIVERY_URL`), and MySQL persistence remains Phase 15 scope. Previous Phase One operational gates remain open. [Test evidence](TEST_REPORT.md#phase-two-local-account-verification) · [Security and rollback](SECURITY.md#phase-two-accounts-and-authentication)
+Implemented self-service profile, password and session controls, scoped account creation, activation and role editing with administrator password reauthentication, inactive-account login-attempt audit monitoring (`LOGIN_FAILED` with generic 401 responses), optional TOTP with recovery codes, sidebar access to Account and Sessions (`/settings`) for all authenticated roles, bilingual Arabic/English Users & Permissions controls, and password recovery through a private loopback delivery contract. Both builds, all 43 workspace tests (including 14 non-viewer granular permission denial assertions), the SQLite rekey fixture, and the headless Chromium browser verification fixture (`account-browser-loopback.js`) passed. Delivery through an actual mail provider and deployed acceptance remain blocked on external mail transport configuration (`MCR_PASSWORD_RESET_DELIVERY_URL`), and MySQL persistence remains Phase 15 scope. Previous Phase One operational gates remain open. [Test evidence](TEST_REPORT.md#phase-two-local-account-verification) آ· [Security and rollback](SECURITY.md#phase-two-accounts-and-authentication)
 
 ## Phase One OBS control tenant isolation and Agent RPC result schemas
 
-Enforced organization ownership checks and audit logging on the OBS audio volume, audio mute and studio-mode transition endpoints, made station create/update/delete transactions atomic with their audit events and full dependent-table cleanup, added transactional and organization-scoped audit logging to legacy graphics, playout schedule/scan/control, native Program scene/schedule and signed IPTV playback-link mutations, tightened OBS control, automation, playout and legacy graphics write schemas with `.strict()`, expanded the REST role matrix to 48 assertions across eight routes, hardened `programInputConfig` and `createProgramEgressProxy` against non-public/metadata/IPv6/local HTTPS source hostnames, hardened Electron IPC origin forwarding, set `build.sourcemap: false` in Vite, and added per-command `COMMAND_ACK` result validation (`SEC-004`) in `AgentGateway` to strip unapproved host fields (`file`, `outputPath`) and reject malformed command acknowledgements with HTTP 502. Both builds, all 43 workspace tests, the SQLite recovery/rekey/cutover fixtures, the local TLS/Chromium/Agent staging fixture and the split-runtime upload, audio-monitor and HLS/UDP continuity fixtures exited 0. Rollback reverts the controller, repository and route checks, strict schema refinements, destination hostname guard, Electron IPC and Vite config updates, gateway result schemas and corresponding regression assertions together. [Gate evidence](PHASE_ONE_GATES.md) · [Security and rollback](SECURITY.md#phase-one-obs-control-ownership-and-agent-rpc-result-schemas)
+Enforced organization ownership checks and audit logging on the OBS audio volume, audio mute and studio-mode transition endpoints, made station create/update/delete transactions atomic with their audit events and full dependent-table cleanup, added transactional and organization-scoped audit logging to legacy graphics, playout schedule/scan/control, native Program scene/schedule and signed IPTV playback-link mutations, tightened OBS control, automation, playout and legacy graphics write schemas with `.strict()`, expanded the REST role matrix to 48 assertions across eight routes, hardened `programInputConfig` and `createProgramEgressProxy` against non-public/metadata/IPv6/local HTTPS source hostnames, hardened Electron IPC origin forwarding, set `build.sourcemap: false` in Vite, and added per-command `COMMAND_ACK` result validation (`SEC-004`) in `AgentGateway` to strip unapproved host fields (`file`, `outputPath`) and reject malformed command acknowledgements with HTTP 502. Both builds, all 43 workspace tests, the SQLite recovery/rekey/cutover fixtures, the local TLS/Chromium/Agent staging fixture and the split-runtime upload, audio-monitor and HLS/UDP continuity fixtures exited 0. Rollback reverts the controller, repository and route checks, strict schema refinements, destination hostname guard, Electron IPC and Vite config updates, gateway result schemas and corresponding regression assertions together. [Gate evidence](PHASE_ONE_GATES.md) آ· [Security and rollback](SECURITY.md#phase-one-obs-control-ownership-and-agent-rpc-result-schemas)
 
 ## Phase Three professional media library and large file upload system
 
@@ -303,7 +303,7 @@ Implemented a centralized, filesystem-backed Media Library and resumable chunked
 - Validates actual file contents via magic-byte inspection and asynchronous FFprobe/FFmpeg decode checks (`UPLOADING` -> `UPLOADED` -> `VALIDATING` -> `PROCESSING` -> `READY` / `FAILED` / `QUARANTINED`), classifying broadcast compatibility (`DIRECT_PLAYBACK`, `REMUX_REQUIRED`, `TRANSCODE_REQUIRED`, `UNSUPPORTED`) and quarantining spoofed files.
 - Supports controlled server-directory imports (`MCR_MEDIA_IMPORT_DIR` with path-traversal and symlink rejection) and SSRF-protected direct HTTPS URL imports (with redirect, metadata IP and private network denial).
 - Enforces reference-locked deletion (`confirm=true`, blocking assets referenced by active broadcasts, schedules, scenes, ads, playout plans or playlists) with transactional `MEDIA_ASSET_DELETED` audit logging.
-- Both builds, all 44 workspace tests, the legacy scene upload regression, and `backend/verification/media-library-loopback.js` (verifying a **1.05 GiB (`1,081,190,040`-byte)** Full HD `1920x1080` MP4 upload across a mid-upload backend restart, a **180-second** Full HD video, and **129 uninterrupted decoded broadcast frames** during concurrent upload and processing) exited 0. [Architecture](MEDIA_LIBRARY_ARCHITECTURE.md) · [Test evidence](TEST_REPORT.md#phase-three-media-library-and-large-upload-verification) · [Security](SECURITY.md#phase-three-media-library-and-resumable-uploads)
+- Both builds, all 44 workspace tests, the legacy scene upload regression, and `backend/verification/media-library-loopback.js` (verifying a **1.05 GiB (`1,081,190,040`-byte)** Full HD `1920x1080` MP4 upload across a mid-upload backend restart, a **180-second** Full HD video, and **129 uninterrupted decoded broadcast frames** during concurrent upload and processing) exited 0. [Architecture](MEDIA_LIBRARY_ARCHITECTURE.md) آ· [Test evidence](TEST_REPORT.md#phase-three-media-library-and-large-upload-verification) آ· [Security](SECURITY.md#phase-three-media-library-and-resumable-uploads)
 
 ## Phase 15 MySQL persistence foundation and Phase Four unified video source management
 
@@ -312,7 +312,7 @@ Implemented the Phase 15 MySQL persistence foundation (`backend/src/infrastructu
 - Supports all 10 required video source types (`UPLOADED_FILE`, `MOVIE`, `PLAYLIST`, `OBS_LIVE`, `HLS_STREAM`, `RTMP_STREAM`, `SRT_STREAM`, `RTSP_STREAM`, `REMOTE_VIDEO_URL`, `SERVER_FILE`) in both SQLite and MySQL repositories.
 - Enforces Phase One SSRF/DNS-rebinding protections, protocol allowlists, DRM prohibition, path-traversal denial, and AES-256-GCM secret encryption at rest.
 - Probes live stream and file sources via `ffprobe`, tracks resolution, frame rate, video/audio codecs and last connection time, applies bounded exponential retry backoff, transitions exhausted sources to `FALLBACK_ACTIVE`, recovers automatically when a source returns, and prevents deletion of referenced media assets or fallback sources.
-- Both builds, all 45 workspace tests, and `backend/verification/mysql-migration-rehearsal.js` exited 0. [Test evidence](TEST_REPORT.md#phase-15-mysql-persistence-foundation-and-phase-four-video-source-verification) · [MySQL migration](MYSQL_MIGRATION_PLAN.md) · [Security](SECURITY.md#phase-four-video-source-management-and-phase-15-mysql-persistence-controls)
+- Both builds, all 45 workspace tests, and `backend/verification/mysql-migration-rehearsal.js` exited 0. [Test evidence](TEST_REPORT.md#phase-15-mysql-persistence-foundation-and-phase-four-video-source-verification) آ· [MySQL migration](MYSQL_MIGRATION_PLAN.md) آ· [Security](SECURITY.md#phase-four-video-source-management-and-phase-15-mysql-persistence-controls)
 
 ## Phase Five independent audio sources and professional multi-track audio mixer
 
@@ -320,7 +320,7 @@ Implemented the server-side multi-channel audio processing and mixing architectu
 
 - Supports all 11 audio source types (`UPLOADED_AUDIO`, `MUSIC_PLAYLIST`, `INTERNET_RADIO`, `ICECAST_STREAM`, `SHOUTCAST_STREAM`, `MICROPHONE_INPUT`, `VIDEO_EXTRACTED_AUDIO`, `OBS_AUDIO_INPUT`, `ADVERTISEMENT_AUDIO`, `FALLBACK_AUDIO`, `GENERATED_SILENCE`) and all 6 routing modes with per-channel isolated `ChannelAudioEngine` state (`Channel 1` vs `Channel 2`).
 - Implements real 16-bit 48 kHz stereo PCM mixing (`mixPcmFrameDsp`), per-source linear volume + dB gain + mute, monitoring-only solo (`soloMonitoring` isolated to `monitorMix` so live `broadcastMix` is never muted by control-room soloing), priority-based automatic ducking with smooth attack/hold/release envelope, equal-power crossfading (`crossfadePcmBuffers`), soft-knee peak limiting (`-1.0 dBFS` ceiling), advertisement audio interruption policies, automatic fallback audio takeover on silence/failure, radio stream SSRF/credential validation and FFprobe health probing with bounded exponential backoff, and explicit session-bound microphone activation.
-- Both builds, all 46 workspace tests, `backend/verification/mysql-migration-rehearsal.js`, `backend/verification/program-audio-monitor-loopback.js`, and `backend/verification/channel-one-audio-acceptance.js` (verifying continuous independent music audio across 5 video switches, video source failure, audio fallback/recovery, ad break policy, and mic ducking with 0 encoder restarts) exited 0. [Audio architecture](AUDIO_ARCHITECTURE.md) · [Test evidence](TEST_REPORT.md#phase-five-independent-audio-sources-and-multi-track-mixer-verification) · [Security](SECURITY.md#phase-five-independent-audio-sources-and-multi-track-mixer-controls)
+- Both builds, all 46 workspace tests, `backend/verification/mysql-migration-rehearsal.js`, `backend/verification/program-audio-monitor-loopback.js`, and `backend/verification/channel-one-audio-acceptance.js` (verifying continuous independent music audio across 5 video switches, video source failure, audio fallback/recovery, ad break policy, and mic ducking with 0 encoder restarts) exited 0. [Audio architecture](AUDIO_ARCHITECTURE.md) آ· [Test evidence](TEST_REPORT.md#phase-five-independent-audio-sources-and-multi-track-mixer-verification) آ· [Security](SECURITY.md#phase-five-independent-audio-sources-and-multi-track-mixer-controls)
 
 ## Phase Six professional server-side multi-channel playout engine
 
@@ -330,9 +330,13 @@ Implemented the server-side multi-channel Full HD (`1920x1080`) GStreamer playou
 - Supports Channel One automatic sequential live camera rotation (`CAMERA_ROTATION`) with dual-slot `input-selector` switching (`0` encoder restarts), continuous independent Phase Five audio, manual camera switching, temporary camera exclusion, automatic skipping of unavailable cameras, fallback activation/recovery, and per-channel authorized camera VPN allowlists (`validateCameraDestinationWithAllowlist`).
 - Supports Channel Two continuous full-length movie playout (`MOVIE_PLAYOUT`) streaming directly from disk via `uridecodebin`, sequential movie queues, inter-movie advertisement break insertion, keyframe seeking, pause/resume, missing/corrupted file skip recovery, and `ACTIVE_BROADCAST` / `CHANNEL_PLAYOUT_REFERENCE` media deletion protection.
 - Enforces resource admission controls (`MCR_MAX_CONCURRENT_CHANNELS`, `MCR_MIN_FREE_MEMORY_MB`), optimistic revision concurrency (`409`), circular fallback hierarchy rejection (`400`), `broadcast:emergency` override auditing, and crash-loop-protected automatic worker recovery.
-- Both builds, all 47 workspace tests, `backend/verification/mysql-migration-rehearsal.js`, and `backend/verification/two-channel-playout-acceptance.js` (verifying a genuine **2h05m / `7,500.021s` Full HD 1080p MP4 movie** uploaded via resumable chunks, simultaneous two-channel `1920x1080` H.264/AAC outputs, camera rotation, 1-hour movie seek, and `SIGKILL` worker crash recovery) exited 0. [Playout architecture](PLAYOUT_ENGINE_ARCHITECTURE.md) · [Recovery plan](WORKER_RECOVERY_PLAN.md) · [Benchmarks](PERFORMANCE_BENCHMARKS.md) · [Test evidence](TEST_REPORT.md#phase-six-server-side-multi-channel-playout-engine-and-2-hour-full-hd-movie-verification)
+- Both builds, all 47 workspace tests, `backend/verification/mysql-migration-rehearsal.js`, and `backend/verification/two-channel-playout-acceptance.js` (verifying a genuine **2h05m / `7,500.021s` Full HD 1080p MP4 movie** uploaded via resumable chunks, simultaneous two-channel `1920x1080` H.264/AAC outputs, camera rotation, 1-hour movie seek, and `SIGKILL` worker crash recovery) exited 0. [Playout architecture](PLAYOUT_ENGINE_ARCHITECTURE.md) آ· [Recovery plan](WORKER_RECOVERY_PLAN.md) آ· [Benchmarks](PERFORMANCE_BENCHMARKS.md) آ· [Test evidence](TEST_REPORT.md#phase-six-server-side-multi-channel-playout-engine-and-2-hour-full-hd-movie-verification)
 
+## Phase Seven — Remediation & Hardening Checkpoint (2026-11-28)
 
-## Phase Seven - Broadcast Scheduler (2026-11-28)
-Implemented and verified locally (SQLite, local MariaDB 10.4.32 only; Oracle MySQL 8.4 gate G48 remains open). Evidence: `backend/test/broadcast-scheduler.test.js` (5 tests: DST, recurrence, validation, RBAC/draft/publish/concurrency/delete-protection, simulated 72-hour schedule), `backend/verification/two-channel-scheduler-acceptance.js` (two real 1920x1080@25 GStreamer channels, FFprobe/FFmpeg receivers, mid-movie ad resume at 5899 ms, camera failure/recovery, manual override, draft isolation, cross-channel isolation), `backend/verification/mysql-migration-rehearsal.js` (scheduler tables parity), full workspace suite 52/52 passing, frontend build passing.
-Not claimed: a real 72-hour wall-clock endurance run (open production gate); the 72-hour test is validation plus a deterministic clock simulation. Manual override currently sets state flags and pauses scheduled starts; it does not switch the live source itself. Production security gates remain open. Phase Eight not started.
+- **Completed in Phase Seven Remediation Pass:**
+  1. Completed end-to-end `MANUAL_SOURCE_OVERRIDE` and `EMERGENCY_OVERRIDE` live playout switching in `channel-playout-supervisor.js` (`_activateSpecificSource`, `triggerManualSourceOverride`, `triggerEmergencySwitch`) and `channel-scheduler.js`, verified by decoded RGB video pixels and uninterrupted independent audio.
+  2. Implemented atomic compare-and-set scheduler leases (`acquireSchedulerLease`), stale-owner write fencing (`409 STALE_SCHEDULER_OWNER`), and durable write-ahead occurrence claiming (`claimOccurrence` on `UNIQUE(occurrenceId)`) in both SQLite and Prisma/MySQL repositories.
+  3. Added real-time equal-power crossfading (`startCrossfade`) on scheduled `INDEPENDENT_AUDIO` deck switches and continuous 2-frame/tick PCM pumping into `channel-worker.py`, verified by Goertzel/DFT frequency measurements (`440 Hz` -> `1000 Hz` -> `880 Hz` fallback -> `1000 Hz`) with `0` silent gaps.
+  4. Upgraded `MultiTrackBroadcastScheduler.jsx` to cover all 29 timeline features and verified it in headless Chrome (`scheduler-browser-loopback.js`).
+- **Next Approved Checkpoint:** Stop at the Phase Seven acceptance gate and await explicit owner authorization before starting **Phase Eight — Multi-Track Timeline Scheduler** (`MASTER_REQUIREMENTS.md` Section 13 / `docs/DEVELOPMENT_PLAN.md`).
